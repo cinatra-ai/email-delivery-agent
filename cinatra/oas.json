@@ -1,0 +1,289 @@
+{
+  "agentspec_version": "26.1.0",
+  "component_type": "Flow",
+  "id": "email-delivery-flow",
+  "name": "Email Delivery Agent",
+  "description": "Owner-controlled email delivery — sends the approved drafts to the confirmed recipients via the email-outreach send use case. Uses a single ApiNode and omits trigger/wait machinery until TriggerWaitNode is available as a real pyagentspec component.",
+  "metadata": {
+    "cinatra": {
+      "type": "flow",
+      "packageName": "@cinatra-ai/email-delivery-agent",
+      "packageVersion": "0.1.1",
+      "hitlScreens": [
+        "@cinatra-ai/email-delivery-agent:output"
+      ],
+      "llm": {
+        "preferredProvider": "openai",
+        "preferredModel": "gpt-5.5"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "title": "campaignId",
+      "type": "string",
+      "json_schema": {
+        "format": "uuid"
+      }
+    },
+    {
+      "title": "approvedDraftBundleRef",
+      "type": "string",
+      "json_schema": {
+        "format": "uuid"
+      }
+    },
+    {
+      "title": "confirmedRecipientsRef",
+      "type": "string",
+      "json_schema": {
+        "format": "uuid"
+      }
+    },
+    {
+      "title": "senderEmail",
+      "type": "string",
+      "description": "From: address — caller must supply directly; sender selection stays with the upstream orchestrator because sender_picker HITL is not part of this flow."
+    },
+    {
+      "title": "agent_run_id",
+      "type": "string",
+      "default": ""
+    }
+  ],
+  "outputs": [
+    {
+      "title": "sendResult",
+      "type": "object"
+    }
+  ],
+  "start_node": {
+    "$component_ref": "start"
+  },
+  "nodes": [
+    {
+      "$component_ref": "start"
+    },
+    {
+      "$component_ref": "send"
+    },
+    {
+      "$component_ref": "end"
+    }
+  ],
+  "control_flow_connections": [
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "start_to_send",
+      "from_node": {
+        "$component_ref": "start"
+      },
+      "to_node": {
+        "$component_ref": "send"
+      }
+    },
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "send_to_end",
+      "from_node": {
+        "$component_ref": "send"
+      },
+      "to_node": {
+        "$component_ref": "end"
+      }
+    }
+  ],
+  "data_flow_connections": [
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_campaignId_to_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "campaignId",
+      "destination_node": {
+        "$component_ref": "send"
+      },
+      "destination_input": "campaignId"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_approvedDraftBundleRef_to_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "approvedDraftBundleRef",
+      "destination_node": {
+        "$component_ref": "send"
+      },
+      "destination_input": "approvedDraftBundleRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_confirmedRecipientsRef_to_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "confirmedRecipientsRef",
+      "destination_node": {
+        "$component_ref": "send"
+      },
+      "destination_input": "confirmedRecipientsRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_senderEmail_to_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "senderEmail",
+      "destination_node": {
+        "$component_ref": "send"
+      },
+      "destination_input": "senderEmail"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_agent_run_id_to_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "agent_run_id",
+      "destination_node": {
+        "$component_ref": "send"
+      },
+      "destination_input": "agent_run_id"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_sendResult_to_end",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "sendResult",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "sendResult"
+    }
+  ],
+  "$referenced_components": {
+    "start": {
+      "component_type": "StartNode",
+      "id": "start",
+      "name": "Inputs",
+      "metadata": {
+        "cinatra": {
+          "required": [
+            "campaignId",
+            "approvedDraftBundleRef",
+            "confirmedRecipientsRef",
+            "senderEmail"
+          ],
+          "hidden": [
+            "agent_run_id"
+          ]
+        }
+      },
+      "inputs": [
+        {
+          "title": "campaignId",
+          "type": "string",
+          "json_schema": {
+            "format": "uuid"
+          }
+        },
+        {
+          "title": "approvedDraftBundleRef",
+          "type": "string",
+          "json_schema": {
+            "format": "uuid"
+          }
+        },
+        {
+          "title": "confirmedRecipientsRef",
+          "type": "string",
+          "json_schema": {
+            "format": "uuid"
+          }
+        },
+        {
+          "title": "senderEmail",
+          "type": "string"
+        },
+        {
+          "title": "agent_run_id",
+          "type": "string",
+          "default": ""
+        }
+      ]
+    },
+    "send": {
+      "component_type": "ApiNode",
+      "id": "send",
+      "name": "Send campaign emails",
+      "url": "{{CINATRA_BASE_URL}}/api/llm-bridge",
+      "http_method": "POST",
+      "data": {
+        "agent_id": "email-delivery-agent",
+        "max_steps": 10,
+        "system": "You are the email-delivery agent. The operator has already approved drafts upstream. Your sole responsibility is to send the campaign by calling email_outreach_send_initial_start, then poll email_outreach_send_initial_status with the campaignId to completion, and return sendResult. Do NOT pause for confirmation, do NOT re-validate drafts/recipients/sender (that already happened upstream). Follow SKILL.md step-by-step. All sends route through sendEmailThroughSystem, which applies dev-mode redirect at the bridge layer.",
+        "user": "Send the campaign now.\nInputs:\n- campaignId: {{ campaignId }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}\n- senderEmail: {{ senderEmail }}",
+        "agent_run_id": "{{ agent_run_id }}",
+        "cinatra_llm": {
+          "preferredProvider": "openai",
+          "preferredModel": "gpt-5.5"
+        }
+      },
+      "inputs": [
+        {
+          "title": "campaignId",
+          "type": "string"
+        },
+        {
+          "title": "approvedDraftBundleRef",
+          "type": "string"
+        },
+        {
+          "title": "confirmedRecipientsRef",
+          "type": "string"
+        },
+        {
+          "title": "senderEmail",
+          "type": "string"
+        },
+        {
+          "title": "agent_run_id",
+          "type": "string"
+        }
+      ],
+      "outputs": [
+        {
+          "title": "sendResult",
+          "type": "object"
+        }
+      ],
+      "metadata": {
+        "cinatra": {
+          "riskClass": "email_send",
+          "requiresApproval": false,
+          "packageName": "@cinatra-ai/email-delivery-agent",
+          "renderer": "@cinatra-ai/email-delivery-agent:output",
+          "description": "Single ApiNode → /api/llm-bridge. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. Trigger subflow, TriggerWaitNode, and sender HITL machinery are omitted until TriggerWaitNode is available as a real pyagentspec component."
+        }
+      }
+    },
+    "end": {
+      "component_type": "EndNode",
+      "id": "end",
+      "name": "End",
+      "outputs": [
+        {
+          "title": "sendResult",
+          "type": "object",
+          "default": {}
+        }
+      ]
+    }
+  }
+}
