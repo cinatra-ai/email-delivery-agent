@@ -11,6 +11,19 @@
   "cinatra": {
     "apiVersion": "cinatra.ai/v1",
     "kind": "agent",
-    "dependencies": []
+    "dependencies": [],
+    "fieldRenderers": [
+      {
+        "id": "@cinatra-ai/email-delivery-agent:output",
+        "kind": "send-confirmation",
+        "priority": 80,
+        "a2uiTranslator": "send-output"
+      },
+      {
+        "id": "@cinatra-ai/email-delivery-agent:send-confirmation",
+        "kind": "send-confirmation",
+        "priority": 80
+      }
+    ]
   }
 }
