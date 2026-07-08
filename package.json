@@ -11,6 +11,7 @@
   "cinatra": {
     "apiVersion": "cinatra.ai/v1",
     "kind": "agent",
+    "displayName": "Email Delivery Agent",
     "dependencies": [],
     "fieldRenderers": [
       {
@@ -25,6 +26,15 @@
         "priority": 80
       }
     ],
-    "consumes": []
+    "consumes": [],
+    "packageType": "agent",
+    "manifestVersion": 1,
+    "sourceTemplateId": "email-delivery-flow",
+    "sourceVersionId": "14875cc4-d56b-4995-ac53-56efbe33daf0",
+    "sourceVersionNumber": 1,
+    "riskLevel": "low",
+    "hasApprovalGates": false,
+    "toolAccess": [],
+    "ownerOrgId": null
   }
 }
