@@ -26,7 +26,16 @@
         "priority": 80
       }
     ],
-    "consumes": [],
+    "consumes": [
+      {
+        "primitive": "email_outreach_send_initial_start",
+        "requirement": "required"
+      },
+      {
+        "primitive": "email_outreach_send_initial_status",
+        "requirement": "required"
+      }
+    ],
     "packageType": "agent",
     "manifestVersion": 1,
     "sourceTemplateId": "email-delivery-flow",
