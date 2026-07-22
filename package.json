@@ -13,19 +13,6 @@
     "kind": "agent",
     "displayName": "Email Delivery Agent",
     "dependencies": [],
-    "fieldRenderers": [
-      {
-        "id": "@cinatra-ai/email-delivery-agent:output",
-        "kind": "send-confirmation",
-        "priority": 80,
-        "a2uiTranslator": "send-output"
-      },
-      {
-        "id": "@cinatra-ai/email-delivery-agent:send-confirmation",
-        "kind": "send-confirmation",
-        "priority": 80
-      }
-    ],
     "consumes": [
       {
         "primitive": "email_outreach_send_initial_start",
