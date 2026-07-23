@@ -3,12 +3,13 @@
   "component_type": "Flow",
   "id": "email-delivery-flow",
   "name": "Email Delivery Agent",
-  "description": "Owner-controlled email delivery — sends the approved drafts to the confirmed recipients via the email-outreach send use case. Uses a single ApiNode and omits trigger/wait machinery until TriggerWaitNode is available as a real pyagentspec component.",
+  "description": "Owner-controlled email delivery. Per the owner ruling 2026-07-22 (groganz) EVERY campaign send PAUSES at the send moment: a read-only prepare step summarizes the pending send from the real campaign data, a confirmation gate surfaces the recipient/draft summary to the operator, and the run proceeds to the actual send ONLY after the operator approves. The send itself is the unchanged single-ApiNode /api/llm-bridge path calling email_outreach_send_initial_start.",
   "metadata": {
     "cinatra": {
       "type": "flow",
       "packageName": "@cinatra-ai/email-delivery-agent",
       "hitlScreens": [
+        "@cinatra-ai/email-delivery-agent:send-confirmation",
         "@cinatra-ai/email-delivery-agent:output"
       ],
       "llm": {
@@ -42,7 +43,7 @@
     {
       "title": "senderEmail",
       "type": "string",
-      "description": "From: address — caller must supply directly; sender selection stays with the upstream orchestrator because sender_picker HITL is not part of this flow."
+      "description": "From: address — caller must supply directly; sender selection stays with the upstream orchestrator because sender_picker HITL is not part of this flow. The confirmation gate surfaces this address PRE-FILLED so the operator confirms the exact sender that will be used."
     },
     {
       "title": "agent_run_id",
@@ -54,6 +55,10 @@
     {
       "title": "sendResult",
       "type": "object"
+    },
+    {
+      "title": "userResponse",
+      "type": "string"
     }
   ],
   "start_node": {
@@ -62,6 +67,12 @@
   "nodes": [
     {
       "$component_ref": "start"
+    },
+    {
+      "$component_ref": "prepare"
+    },
+    {
+      "$component_ref": "confirmation_gate"
     },
     {
       "$component_ref": "send"
@@ -73,9 +84,29 @@
   "control_flow_connections": [
     {
       "component_type": "ControlFlowEdge",
-      "name": "start_to_send",
+      "name": "start_to_prepare",
       "from_node": {
         "$component_ref": "start"
+      },
+      "to_node": {
+        "$component_ref": "prepare"
+      }
+    },
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "prepare_to_confirmation_gate",
+      "from_node": {
+        "$component_ref": "prepare"
+      },
+      "to_node": {
+        "$component_ref": "confirmation_gate"
+      }
+    },
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "confirmation_gate_to_send",
+      "from_node": {
+        "$component_ref": "confirmation_gate"
       },
       "to_node": {
         "$component_ref": "send"
@@ -93,6 +124,90 @@
     }
   ],
   "data_flow_connections": [
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_campaignId_to_prepare",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "campaignId",
+      "destination_node": {
+        "$component_ref": "prepare"
+      },
+      "destination_input": "campaignId"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_approvedDraftBundleRef_to_prepare",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "approvedDraftBundleRef",
+      "destination_node": {
+        "$component_ref": "prepare"
+      },
+      "destination_input": "approvedDraftBundleRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_confirmedRecipientsRef_to_prepare",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "confirmedRecipientsRef",
+      "destination_node": {
+        "$component_ref": "prepare"
+      },
+      "destination_input": "confirmedRecipientsRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_agent_run_id_to_prepare",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "agent_run_id",
+      "destination_node": {
+        "$component_ref": "prepare"
+      },
+      "destination_input": "agent_run_id"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_campaignId_to_confirmation_gate",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "campaignId",
+      "destination_node": {
+        "$component_ref": "confirmation_gate"
+      },
+      "destination_input": "campaignId"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_senderEmail_to_confirmation_gate",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "senderEmail",
+      "destination_node": {
+        "$component_ref": "confirmation_gate"
+      },
+      "destination_input": "senderEmail"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "prepare_summary_to_confirmation_gate",
+      "source_node": {
+        "$component_ref": "prepare"
+      },
+      "source_output": "summary",
+      "destination_node": {
+        "$component_ref": "confirmation_gate"
+      },
+      "destination_input": "summary"
+    },
     {
       "component_type": "DataFlowEdge",
       "name": "start_campaignId_to_send",
@@ -164,6 +279,18 @@
         "$component_ref": "end"
       },
       "destination_input": "sendResult"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "confirmation_gate_userResponse_to_end",
+      "source_node": {
+        "$component_ref": "confirmation_gate"
+      },
+      "source_output": "userResponse",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "userResponse"
     }
   ],
   "$referenced_components": {
@@ -217,6 +344,91 @@
         }
       ]
     },
+    "prepare": {
+      "component_type": "ApiNode",
+      "id": "prepare",
+      "name": "Summarize the pending send",
+      "url": "{{CINATRA_BASE_URL}}/api/llm-bridge",
+      "http_method": "POST",
+      "data": {
+        "agent_id": "email-delivery-agent",
+        "max_steps": 8,
+        "system": "You are the email-delivery agent's PRE-SEND summarizer. You do NOT send anything. You MUST objects_get ALL THREE records: the approved draft bundle (approvedDraftBundleRef), the confirmed recipient set (confirmedRecipientsRef), and the campaign record (campaignId, to determine its scheduled send time). Then return a SINGLE JSON object with exactly one top-level key: \"summary\": { \"recipientCount\": <integer number of confirmed recipients ACTUALLY loaded from confirmedRecipientsRef>, \"draftCount\": <integer number of approved drafts ACTUALLY in the loaded bundle>, \"scheduledAt\": <the campaign's scheduled send time as an ISO-8601 string when the campaign record shows it is scheduled for the future, otherwise the empty string \"\"> }. Count ONLY from the records you actually loaded — NEVER guess, estimate, or emit placeholder numbers. FAIL VISIBLE: if a ref cannot be read, OMIT that count key entirely (do NOT substitute a guessed, zero, or placeholder value) so the operator sees incomplete data at the confirmation gate and can decline. Use objects_get ONLY; do not call any send, save, update, or other write tool. This step exists so the operator can review the REAL recipient/draft counts at the confirmation gate before approving the send.",
+        "user": "Summarize the pending campaign send for operator confirmation. Do NOT send.\nInputs:\n- campaignId: {{ campaignId }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}",
+        "agent_run_id": "{{ agent_run_id }}",
+        "cinatra_llm": {
+          "preferredProvider": "openai",
+          "preferredModel": "gpt-5.5"
+        }
+      },
+      "inputs": [
+        {
+          "title": "campaignId",
+          "type": "string"
+        },
+        {
+          "title": "approvedDraftBundleRef",
+          "type": "string"
+        },
+        {
+          "title": "confirmedRecipientsRef",
+          "type": "string"
+        },
+        {
+          "title": "agent_run_id",
+          "type": "string"
+        }
+      ],
+      "outputs": [
+        {
+          "title": "summary",
+          "type": "object"
+        }
+      ],
+      "metadata": {
+        "cinatra": {
+          "riskClass": "read_only",
+          "requiresApproval": false,
+          "packageName": "@cinatra-ai/email-delivery-agent",
+          "description": "Read-only pre-send summarizer. Reads approvedDraftBundleRef + confirmedRecipientsRef (and optionally the campaign record) via the injected Cinatra self-MCP objects_get and returns { summary: { recipientCount, draftCount, scheduledAt } } computed from the REAL loaded records. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path reaches objects_get. This node performs NO write — it only produces the summary the confirmation gate surfaces to the operator."
+        }
+      }
+    },
+    "confirmation_gate": {
+      "component_type": "InputMessageNode",
+      "id": "confirmation_gate",
+      "name": "Confirm campaign send",
+      "metadata": {
+        "cinatra": {
+          "riskClass": "approval",
+          "requiresApproval": true,
+          "surfaceGateInputs": true,
+          "renderer": "@cinatra-ai/email-delivery-agent:send-confirmation",
+          "a2uiSurfaceId": "email-delivery:send-confirmation:input",
+          "description": "Owner ruling 2026-07-22 (groganz): every campaign send PAUSES here with the recipient/draft summary; the run proceeds to the send node ONLY on operator approval. surfaceGateInputs surfaces campaignId + senderEmail + the prepare-step summary (recipientCount/draftCount/scheduledAt) to the pack-served @cinatra-ai/email-delivery-agent:send-confirmation renderer as the interrupt payload. There is no control-flow edge that reaches the send node except through this gate, so a resume cannot skip the confirmation."
+        }
+      },
+      "inputs": [
+        {
+          "title": "campaignId",
+          "type": "string"
+        },
+        {
+          "title": "senderEmail",
+          "type": "string"
+        },
+        {
+          "title": "summary",
+          "type": "object"
+        }
+      ],
+      "outputs": [
+        {
+          "title": "userResponse",
+          "type": "string"
+        }
+      ]
+    },
     "send": {
       "component_type": "ApiNode",
       "id": "send",
@@ -226,8 +438,8 @@
       "data": {
         "agent_id": "email-delivery-agent",
         "max_steps": 10,
-        "system": "You are the email-delivery agent. The operator has already approved drafts upstream. Your sole responsibility is to send the campaign by calling email_outreach_send_initial_start, then poll email_outreach_send_initial_status with the campaignId to completion, and return sendResult. Do NOT pause for confirmation, do NOT re-validate drafts/recipients/sender (that already happened upstream). Follow SKILL.md step-by-step. All sends route through sendEmailThroughSystem, which applies dev-mode redirect at the bridge layer.",
-        "user": "Send the campaign now.\nInputs:\n- campaignId: {{ campaignId }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}\n- senderEmail: {{ senderEmail }}",
+        "system": "You are the email-delivery agent. The operator has EXPLICITLY CONFIRMED this send at the send-confirmation approval gate — they reviewed the recipient/draft summary and approved, so you are now on the post-approval path. Your sole responsibility is to EXECUTE the approved send: call email_outreach_send_initial_start, then poll email_outreach_send_initial_status with the campaignId to completion, and return sendResult. Do NOT re-prompt for confirmation — that already happened at the gate — and do NOT re-validate drafts/recipients/sender (that happened upstream). Follow SKILL.md step-by-step. All sends route through sendEmailThroughSystem, which applies dev-mode redirect at the bridge layer.",
+        "user": "The operator approved the send at the confirmation gate. Execute the campaign send now.\nInputs:\n- campaignId: {{ campaignId }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}\n- senderEmail: {{ senderEmail }}",
         "agent_run_id": "{{ agent_run_id }}",
         "cinatra_llm": {
           "preferredProvider": "openai",
@@ -268,7 +480,7 @@
           "requiresApproval": false,
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
-          "description": "Single ApiNode → /api/llm-bridge. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. Trigger subflow, TriggerWaitNode, and sender HITL machinery are omitted until TriggerWaitNode is available as a real pyagentspec component."
+          "description": "Single ApiNode → /api/llm-bridge. Runs ONLY after the confirmation_gate approval. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive, unchanged). metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false HERE because the human approval is enforced structurally by the upstream confirmation_gate, not by re-gating the send."
         }
       }
     },
@@ -281,6 +493,11 @@
           "title": "sendResult",
           "type": "object",
           "default": {}
+        },
+        {
+          "title": "userResponse",
+          "type": "string",
+          "default": ""
         }
       ]
     }
