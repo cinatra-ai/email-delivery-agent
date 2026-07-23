@@ -29,7 +29,7 @@
     "sourceVersionId": "14875cc4-d56b-4995-ac53-56efbe33daf0",
     "sourceVersionNumber": 1,
     "riskLevel": "low",
-    "hasApprovalGates": false,
+    "hasApprovalGates": true,
     "toolAccess": [],
     "ownerOrgId": null
   }
