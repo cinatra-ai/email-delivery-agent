@@ -11,7 +11,18 @@
     "apiVersion": "cinatra.ai/v1",
     "kind": "agent",
     "displayName": "Email Delivery Agent",
-    "dependencies": [],
+    "dependencies": [
+      {
+        "packageName": "@cinatra-ai/email-artifacts",
+        "edgeType": "runtime",
+        "versionConstraint": {
+          "kind": "semver-range",
+          "range": "^0.1.0"
+        },
+        "requirement": "required",
+        "kind": "artifact"
+      }
+    ],
     "consumes": [
       {
         "primitive": "email_outreach_send_initial_start",
@@ -31,5 +42,8 @@
     "hasApprovalGates": true,
     "toolAccess": [],
     "ownerOrgId": null
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
   }
 }
