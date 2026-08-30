@@ -9,8 +9,7 @@
       "type": "flow",
       "packageName": "@cinatra-ai/email-delivery-agent",
       "hitlScreens": [
-        "@cinatra-ai/email-delivery-agent:send-confirmation",
-        "@cinatra-ai/email-delivery-agent:output"
+        "@cinatra-ai/email-delivery-agent:send-confirmation"
       ],
       "llm": {
         "preferredProvider": "openai",
