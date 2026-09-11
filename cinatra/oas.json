@@ -381,7 +381,30 @@
       "outputs": [
         {
           "title": "summary",
-          "type": "object"
+          "type": "object",
+          "description": "The pre-send summary the confirmation gate surfaces. Every member is always present: the structured-output contract the runtime derives from this declaration carries no optional key, so an unreadable ref is reported as a count of 0 and an unscheduled campaign as the empty string.",
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "recipientCount": {
+                "type": "integer",
+                "description": "Confirmed recipients actually loaded from confirmedRecipientsRef."
+              },
+              "draftCount": {
+                "type": "integer",
+                "description": "Approved drafts actually loaded from approvedDraftBundleRef."
+              },
+              "scheduledAt": {
+                "type": "string",
+                "description": "The campaign's scheduled send time as an ISO-8601 string, or the empty string when it is not scheduled for the future."
+              }
+            },
+            "required": [
+              "recipientCount",
+              "draftCount",
+              "scheduledAt"
+            ]
+          }
         }
       ],
       "metadata": {
@@ -470,7 +493,49 @@
       "outputs": [
         {
           "title": "sendResult",
-          "type": "object"
+          "type": "object",
+          "description": "The terminal result of the approved send. Every member is always present: the structured-output contract the runtime derives from this declaration carries no optional key, so errorCode and errorMessage are the empty string when status is completed.",
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed"
+                ],
+                "description": "The terminal status polled from email_outreach_send_initial_status."
+              },
+              "totalSent": {
+                "type": "integer",
+                "description": "Messages the send operation reported as sent."
+              },
+              "totalFailed": {
+                "type": "integer",
+                "description": "Messages the send operation reported as failed."
+              },
+              "operationId": {
+                "type": "string",
+                "description": "The operation identifier email_outreach_send_initial_start returned, or the empty string when the send never started."
+              },
+              "errorCode": {
+                "type": "string",
+                "description": "The failure code when status is failed, otherwise the empty string."
+              },
+              "errorMessage": {
+                "type": "string",
+                "description": "The failure detail when status is failed, otherwise the empty string."
+              }
+            },
+            "required": [
+              "status",
+              "totalSent",
+              "totalFailed",
+              "operationId",
+              "errorCode",
+              "errorMessage"
+            ]
+          }
         }
       ],
       "metadata": {
