@@ -94,5 +94,5 @@ test("6d — the declared pauses are exactly the pauses the flow has", () => {
   assert.deepEqual(oas.metadata.cinatra.hitlScreens, [
     "@cinatra-ai/email-delivery-agent:send-confirmation",
   ]);
-  assert.deepEqual(approvalNodes(oas), ["confirmation_gate"]);
+  assert.deepEqual(approvalNodes(oas), ["approval_gate"]);
 });

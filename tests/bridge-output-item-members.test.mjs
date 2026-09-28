@@ -78,6 +78,7 @@ test("send/sendResult declares its item members", () => {
     "errorMessage",
     "operationId",
     "status",
+    "summary",
     "totalFailed",
     "totalSent",
   ]);
@@ -88,6 +89,7 @@ test("send/sendResult declares its item members", () => {
   assert.equal(members.operationId.type, "string");
   assert.equal(members.errorCode.type, "string");
   assert.equal(members.errorMessage.type, "string");
+  assert.equal(members.summary.type, "string");
   assert.deepEqual(declaredRequired(output).sort(), Object.keys(members).sort());
 });
 

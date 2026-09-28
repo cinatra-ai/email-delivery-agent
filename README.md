@@ -9,8 +9,8 @@ The final send step of an outreach campaign. Connect your Gmail account in works
 ## Capabilities
 
 - Send an approved outreach campaign through your connected email provider
-- Accept four required inputs: campaign ID (UUID), approved draft bundle reference (UUID), confirmed recipients reference (UUID), and sender email address
-- Poll the send operation to completion and surface a structured delivery summary with total sent, total failed, and an operation ID
+- Ask only for the sender email address, its one required input, drawn with the Email Outreach Agent's sender picker when that agent is installed; the campaign ID, the approved draft bundle reference and the confirmed recipients reference are handed in by the orchestrating agent
+- Poll the send operation to completion and surface a structured delivery summary with total sent, total failed, and an operation ID, ending with one plain sentence on how many messages went out and, on a failure, what stopped the send
 - Route every message through the workspace send pipeline, which applies the dev-mode redirect at the bridge layer when configured
 - Return a machine-readable send result object for the calling orchestrator or for display in the Human-in-the-Loop send confirmation screen
 - Fail fast with a structured error code when object resolution fails (OBJECTS_FETCH_FAILED) or the poll budget is exhausted (POLL_BUDGET_EXHAUSTED)
