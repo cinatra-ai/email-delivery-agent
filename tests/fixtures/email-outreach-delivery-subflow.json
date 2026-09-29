@@ -1,0 +1,424 @@
+{
+  "agentspec_version": "26.1.0",
+  "component_type": "Flow",
+  "id": "email-delivery-subflow",
+  "name": "Email Delivery Agent",
+  "inputs": [
+    {
+      "title": "agent_run_id",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "title": "confirmedRecipientsRef",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "title": "senderEmail",
+      "type": "string",
+      "default": "",
+      "description": "Sender email address",
+      "json_schema": {
+        "format": "email"
+      }
+    },
+    {
+      "title": "approvedDraftBundleRef",
+      "type": "string",
+      "default": "",
+      "description": "Approved draft bundle reference (UUID)",
+      "json_schema": {
+        "format": "uuid"
+      }
+    },
+    {
+      "title": "campaignId",
+      "type": "string",
+      "default": "",
+      "description": "Campaign the send belongs to",
+      "json_schema": {
+        "format": "uuid"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "title": "sendResult",
+      "type": "object"
+    },
+    {
+      "title": "userResponse",
+      "type": "string"
+    }
+  ],
+  "start_node": {
+    "$component_ref": "sender-start"
+  },
+  "nodes": [
+    {
+      "$component_ref": "sender-start"
+    },
+    {
+      "$component_ref": "sender-send"
+    },
+    {
+      "$component_ref": "sender-approval_gate"
+    },
+    {
+      "$component_ref": "sender-end"
+    }
+  ],
+  "control_flow_connections": [
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "sender-start_to_sender-approval_gate",
+      "from_node": {
+        "$component_ref": "sender-start"
+      },
+      "to_node": {
+        "$component_ref": "sender-approval_gate"
+      }
+    },
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "sender-approval_gate_to_sender-send",
+      "from_node": {
+        "$component_ref": "sender-approval_gate"
+      },
+      "to_node": {
+        "$component_ref": "sender-send"
+      }
+    },
+    {
+      "component_type": "ControlFlowEdge",
+      "name": "sender-send_to_sender-end",
+      "from_node": {
+        "$component_ref": "sender-send"
+      },
+      "to_node": {
+        "$component_ref": "sender-end"
+      }
+    }
+  ],
+  "data_flow_connections": [
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-send_agent_run_id",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "agent_run_id",
+      "destination_node": {
+        "$component_ref": "sender-send"
+      },
+      "destination_input": "agent_run_id"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-send_confirmedRecipientsRef",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "confirmedRecipientsRef",
+      "destination_node": {
+        "$component_ref": "sender-send"
+      },
+      "destination_input": "confirmedRecipientsRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-send_senderEmail",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "senderEmail",
+      "destination_node": {
+        "$component_ref": "sender-send"
+      },
+      "destination_input": "senderEmail"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-send_approvedDraftBundleRef",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "approvedDraftBundleRef",
+      "destination_node": {
+        "$component_ref": "sender-send"
+      },
+      "destination_input": "approvedDraftBundleRef"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-send_to_sender-end_sendResult",
+      "source_node": {
+        "$component_ref": "sender-send"
+      },
+      "source_output": "sendResult",
+      "destination_node": {
+        "$component_ref": "sender-end"
+      },
+      "destination_input": "sendResult"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-approval_gate_to_sender-end_userResponse",
+      "source_node": {
+        "$component_ref": "sender-approval_gate"
+      },
+      "source_output": "userResponse",
+      "destination_node": {
+        "$component_ref": "sender-end"
+      },
+      "destination_input": "userResponse"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-send_campaignId",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "campaignId",
+      "destination_node": {
+        "$component_ref": "sender-send"
+      },
+      "destination_input": "campaignId"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-approval_gate_campaignId",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "campaignId",
+      "destination_node": {
+        "$component_ref": "sender-approval_gate"
+      },
+      "destination_input": "campaignId"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "sender-start_to_sender-approval_gate_senderEmail",
+      "source_node": {
+        "$component_ref": "sender-start"
+      },
+      "source_output": "senderEmail",
+      "destination_node": {
+        "$component_ref": "sender-approval_gate"
+      },
+      "destination_input": "senderEmail"
+    }
+  ],
+  "$referenced_components": {
+    "sender-start": {
+      "component_type": "StartNode",
+      "id": "sender-start",
+      "name": "Inputs",
+      "metadata": {
+        "cinatra": {
+          "required": [
+            "senderEmail"
+          ],
+          "hidden": [
+            "agent_run_id",
+            "confirmedRecipientsRef",
+            "approvedDraftBundleRef",
+            "campaignId"
+          ],
+          "inputRenderers": {
+            "senderEmail": "@cinatra-ai/email-outreach-agent:gmail-sender"
+          }
+        }
+      },
+      "inputs": [
+        {
+          "title": "agent_run_id",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "confirmedRecipientsRef",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "senderEmail",
+          "type": "string",
+          "description": "Sender email address",
+          "json_schema": {
+            "format": "email"
+          },
+          "default": ""
+        },
+        {
+          "title": "approvedDraftBundleRef",
+          "type": "string",
+          "default": "",
+          "description": "Approved draft bundle reference (UUID)",
+          "json_schema": {
+            "format": "uuid"
+          }
+        },
+        {
+          "title": "campaignId",
+          "type": "string",
+          "default": "",
+          "json_schema": {
+            "format": "uuid"
+          }
+        }
+      ]
+    },
+    "sender-send": {
+      "component_type": "ApiNode",
+      "id": "sender-send",
+      "name": "Send campaign emails",
+      "url": "{{CINATRA_BASE_URL}}/api/llm-bridge",
+      "http_method": "POST",
+      "data": {
+        "system": "You are an email campaign sender agent. Fetch the confirmed recipients via objects_get(confirmedRecipientsRef) and the approved draft bundle via objects_get(approvedDraftBundleRef). You safely launch an approved outreach campaign and enforce an explicit human approval boundary before any real send. Record the send against campaignId. Return a structured result covering approval status, send status, and any operational issues. If objects_get returns null or wrong typeHint for any ref, set sendResult to an error object and do NOT send any email.",
+        "user": "Execute the email sending task now and return the result as JSON.\nInputs:\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- senderEmail: {{ senderEmail }}\n- campaignId: {{ campaignId }}",
+        "agent_id": "email-delivery",
+        "agent_run_id": "{{ agent_run_id }}"
+      },
+      "inputs": [
+        {
+          "title": "agent_run_id",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "confirmedRecipientsRef",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "senderEmail",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "approvedDraftBundleRef",
+          "type": "string",
+          "default": "",
+          "json_schema": {
+            "format": "uuid"
+          }
+        },
+        {
+          "title": "campaignId",
+          "type": "string",
+          "default": "",
+          "json_schema": {
+            "format": "uuid"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "title": "sendResult",
+          "type": "object",
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
+      "metadata": {
+        "cinatra": {
+          "riskClass": "email_send",
+          "requiresApproval": true,
+          "renderer": "@cinatra-ai/email-delivery-agent:output",
+          "a2uiSurfaceId": "email-delivery:step-1:output"
+        }
+      }
+    },
+    "sender-end": {
+      "component_type": "EndNode",
+      "id": "sender-end",
+      "name": "End",
+      "outputs": [
+        {
+          "title": "sendResult",
+          "type": "object"
+        },
+        {
+          "title": "userResponse",
+          "type": "string"
+        }
+      ]
+    },
+    "sender-approval_gate": {
+      "component_type": "InputMessageNode",
+      "id": "sender-approval_gate",
+      "name": "Confirm the send",
+      "metadata": {
+        "cinatra": {
+          "riskClass": "approval",
+          "requiresApproval": true,
+          "renderer": "@cinatra-ai/email-delivery-agent:send-confirmation",
+          "a2uiSurfaceId": "email-delivery:send-confirmation:input",
+          "autoSkipWhenInputsPresent": false,
+          "description": "Confirm the campaign and the mailbox it will be sent from. Nothing leaves before you confirm.",
+          "inputMessageSchema": {
+            "type": "object",
+            "x-renderer": "@cinatra-ai/email-delivery-agent:send-confirmation",
+            "properties": {
+              "campaignId": {
+                "type": "string",
+                "title": "Campaign",
+                "readOnly": true
+              },
+              "senderEmail": {
+                "type": "string",
+                "title": "Send from",
+                "format": "email",
+                "readOnly": true
+              },
+              "decision": {
+                "type": "string",
+                "title": "Decision",
+                "enum": [
+                  "approve",
+                  "revise",
+                  "reject"
+                ],
+                "description": "Approve the step, send it back for revision, or reject the run."
+              }
+            },
+            "required": [
+              "decision"
+            ]
+          }
+        }
+      },
+      "outputs": [
+        {
+          "title": "userResponse",
+          "type": "string"
+        }
+      ],
+      "inputs": [
+        {
+          "title": "campaignId",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "senderEmail",
+          "type": "string",
+          "default": ""
+        }
+      ]
+    }
+  }
+}
