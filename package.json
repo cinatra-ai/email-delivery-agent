@@ -41,7 +41,13 @@
     "riskLevel": "low",
     "hasApprovalGates": true,
     "toolAccess": [],
-    "ownerOrgId": null
+    "ownerOrgId": null,
+    "tools": [
+      {
+        "name": "recipient_records",
+        "module": "./cinatra/tools/recipient-records.mjs"
+      }
+    ]
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs"
