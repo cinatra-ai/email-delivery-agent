@@ -3,11 +3,13 @@
 //
 // The delivery flow calls this module through its recipient filing step. The
 // module reads the run's confirmed recipient list through the objects port,
-// then saves one record of the recipient type for each confirmed recipient,
-// one at a time and in list order. A record is keyed by the contact when the
-// row names one, else by the lower-cased address, and carries the address only
-// where the row has one. A row with neither key is not filed, and a contact
-// that an earlier row of the same list already filed is not filed twice.
+// then saves one record of the recipient type for each confirmed recipient
+// that has an address, one at a time and in list order. A record is keyed by
+// the contact when the row names one, else by the lower-cased address, and
+// always carries the address. A recipient without an address is not filed and
+// is counted as skipped for that reason, and a contact that an earlier row of
+// the same list already filed is not filed twice. Every row is checked before
+// the first record is saved.
 //
 // Neither the run nor the scope is ever in this file: the host binds the run
 // where a record carries the marker { boundRun: true }, and the port scopes
@@ -54,34 +56,39 @@ export async function extensionTool({ input, ports }) {
   const campaignId = trimmedOrNone(input?.campaignId);
 
   const filedKeys = new Set();
-  let filed = 0;
+  const records = [];
   let skipped = 0;
+  let skippedWithoutAddress = 0;
   for (const row of rows) {
     if (!isPlainObject(row)) {
       skipped += 1;
       continue;
     }
-    const contactId = trimmedOrNone(row.contactId);
     const address = trimmedOrNone(row.email ?? row.recipientEmail);
-    const key = contactId !== undefined
-      ? `contact:${contactId}`
-      : address !== undefined
-        ? `email:${address.toLowerCase()}`
-        : undefined;
-    if (key === undefined || filedKeys.has(key)) {
+    if (address === undefined) {
+      skipped += 1;
+      skippedWithoutAddress += 1;
+      continue;
+    }
+    const contactId = trimmedOrNone(row.contactId);
+    const key = contactId !== undefined ? `contact:${contactId}` : `email:${address.toLowerCase()}`;
+    if (filedKeys.has(key)) {
       skipped += 1;
       continue;
     }
     filedKeys.add(key);
 
-    const data = { runId: { boundRun: true }, contactKey: key };
-    if (address !== undefined) data.email = address;
+    const data = { runId: { boundRun: true }, contactKey: key, email: address };
     if (campaignId !== undefined) data.campaignId = campaignId;
     data.confirmed = true;
+    records.push(data);
+  }
 
+  let filed = 0;
+  for (const data of records) {
     await ports.objects.save({ type: RECIPIENT_TYPE, data });
     filed += 1;
   }
 
-  return { ok: true, filed, skipped };
+  return { ok: true, filed, skipped, skippedWithoutAddress };
 }
