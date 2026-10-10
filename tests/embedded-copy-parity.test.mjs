@@ -13,7 +13,7 @@
 // with equal scalar values. Extra keys and extra entries are allowed: this flow
 // keeps its own read-only prepare step, the summary the confirmation shows,
 // its closing sentence after the send and its end with its typed defaults.
-// This flow also files the recipient records between its summary and its confirmation, a step of its own the copy does not carry yet.
+// This flow also files the recipient records between its confirmation and its send, a step of its own the copy does not carry yet.
 //
 // Three paths are not compared, and each is held another way:
 // - send.data.system and send.data.user, the send step's prompt texts: this
@@ -158,8 +158,11 @@ test("(7) every control edge of the copy is one of this flow, but the summary be
   const missing = [...controlEdgesOf(copy)]
     .filter((edge) => edge !== "start -> approval_gate")
     .filter((edge) => edge !== "send -> end")
+    // The copy's confirmation goes straight to its send; this flow files the
+    // recipient records between the two.
+    .filter((edge) => edge !== "approval_gate -> send")
     .filter((edge) => !have.has(edge));
-  for (const edge of ["start -> prepare", "prepare -> file_recipients", "file_recipients -> approval_gate", "send -> delivery_summary", "delivery_summary -> end"]) {
+  for (const edge of ["start -> prepare", "prepare -> approval_gate", "approval_gate -> file_recipients", "file_recipients -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
     if (!have.has(edge)) missing.push(edge);
   }
   assert.deepEqual(missing, [], "this flow lacks the copy's control edges: " + missing.join("; "));

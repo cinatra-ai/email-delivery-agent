@@ -75,19 +75,26 @@ test("S2 the file_recipients component has the declared shape", () => {
   });
 });
 
-test("S3 the step is listed directly after prepare", () => {
+test("S3 the step is listed directly after the confirmation", () => {
   const ids = oas.nodes.map((n) => n.$component_ref);
-  assert.equal(ids[ids.indexOf("prepare") + 1], "file_recipients");
+  assert.ok(ids.indexOf("approval_gate") < ids.indexOf("file_recipients"));
+  assert.equal(ids[ids.indexOf("approval_gate") + 1], "file_recipients");
+  assert.equal(ids[ids.indexOf("file_recipients") + 1], "send");
 });
 
-test("S4 the filing step sits between prepare and the confirmation; the confirmation is still the only way into the send", () => {
+test("S4 the edge list puts the confirmation before the filing step, and the filing step before the send", () => {
   const edges = controlEdges().map(([a, b]) => `${a} -> ${b}`);
-  assert.ok(edges.includes("prepare -> file_recipients"));
-  assert.ok(edges.includes("file_recipients -> approval_gate"));
-  assert.ok(!edges.includes("prepare -> approval_gate"));
-  assert.deepEqual(into("file_recipients"), ["prepare"]);
-  assert.deepEqual(into("approval_gate"), ["file_recipients"]);
-  assert.deepEqual(into("send"), ["approval_gate"]);
+  assert.deepEqual(edges, [
+    "start -> prepare",
+    "prepare -> approval_gate",
+    "approval_gate -> file_recipients",
+    "file_recipients -> send",
+    "send -> delivery_summary",
+    "delivery_summary -> end",
+  ]);
+  assert.deepEqual(into("approval_gate"), ["prepare"]);
+  assert.deepEqual(into("file_recipients"), ["approval_gate"]);
+  assert.deepEqual(into("send"), ["file_recipients"]);
 });
 
 test("S5 the data edges into file_recipients are the three start inputs, each once", () => {
@@ -99,6 +106,27 @@ test("S5 the data edges into file_recipients are the three start inputs, each on
     ["start", "confirmedRecipientsRef", "confirmedRecipientsRef"],
     ["start", "campaignId", "campaignId"],
   ]);
+});
+
+test("S7 no path from start reaches the filing step or the send without passing the confirmation", () => {
+  const edges = controlEdges();
+  const reach = (blocked) => {
+    const seen = new Set();
+    const queue = [oas.start_node.$component_ref];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      if (seen.has(id) || id === blocked) continue;
+      seen.add(id);
+      for (const [from, to] of edges) if (from === id) queue.push(to);
+    }
+    return seen;
+  };
+  const open = reach(null);
+  assert.ok(open.has("file_recipients"));
+  assert.ok(open.has("send"));
+  const gated = reach("approval_gate");
+  assert.ok(!gated.has("file_recipients"));
+  assert.ok(!gated.has("send"));
 });
 
 test("S6 the module names no run or external key and imports nothing", () => {
