@@ -73,7 +73,8 @@ test("(19) every failure code the send step names has its own sentence", () => {
 test("(19) the closing statement follows the send, and the send still follows the confirmation alone", () => {
   const into = (id) => controlEdges.filter((e) => e.to === id).map((e) => e.from).sort();
   assert.deepEqual(into("delivery_summary"), ["send"]);
-  assert.deepEqual(into("send"), ["approval_gate"]);
+  assert.deepEqual(into("send"), ["file_recipients"]);
+  assert.deepEqual(into("file_recipients"), ["approval_gate"]);
   assert.deepEqual(into("end"), ["delivery_summary"]);
 });
 

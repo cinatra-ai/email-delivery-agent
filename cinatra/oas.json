@@ -77,10 +77,10 @@
       "$component_ref": "prepare"
     },
     {
-      "$component_ref": "file_recipients"
+      "$component_ref": "approval_gate"
     },
     {
-      "$component_ref": "approval_gate"
+      "$component_ref": "file_recipients"
     },
     {
       "$component_ref": "send"
@@ -105,29 +105,29 @@
     },
     {
       "component_type": "ControlFlowEdge",
-      "name": "prepare_to_file_recipients",
+      "name": "prepare_to_approval_gate",
       "from_node": {
         "$component_ref": "prepare"
       },
       "to_node": {
-        "$component_ref": "file_recipients"
+        "$component_ref": "approval_gate"
       }
     },
     {
       "component_type": "ControlFlowEdge",
-      "name": "file_recipients_to_approval_gate",
+      "name": "approval_gate_to_file_recipients",
       "from_node": {
-        "$component_ref": "file_recipients"
+        "$component_ref": "approval_gate"
       },
       "to_node": {
-        "$component_ref": "approval_gate"
+        "$component_ref": "file_recipients"
       }
     },
     {
       "component_type": "ControlFlowEdge",
-      "name": "approval_gate_to_send",
+      "name": "file_recipients_to_send",
       "from_node": {
-        "$component_ref": "approval_gate"
+        "$component_ref": "file_recipients"
       },
       "to_node": {
         "$component_ref": "send"
@@ -561,7 +561,7 @@
           "riskClass": "write",
           "requiresApproval": false,
           "packageName": "@cinatra-ai/email-delivery-agent",
-          "description": "The agent files one recipient record per confirmed recipient of this run, keyed by the run and the contact, with the address only where one exists. A record that is refused ends the run before the send confirmation is asked."
+          "description": "The agent files one recipient record per confirmed recipient of this run, keyed by the run and the contact, with the address only where one exists, after the operator has confirmed the send and before any email is sent. A record that is refused ends the run before the send."
         }
       }
     },
