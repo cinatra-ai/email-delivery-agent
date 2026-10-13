@@ -1,6 +1,7 @@
 // The declared module recipient-records.mjs: one recipient record per confirmed
-// recipient that has an address, keyed as the application keys it; a recipient
-// without an address is skipped and counted - cinatra-ai/cinatra#3089.
+// recipient, keyed by the contact or else by the address, with the address only
+// where one exists; a row that names no recipient is refused before any record
+// is saved - cinatra-ai/cinatra#3089.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -67,22 +68,21 @@ const R1_ROWS = [
   { contactId: "c-2", name: "Ben" },
   { email: "Cy@Example.org" },
   { recipientEmail: "dee@example.org" },
-  { name: "Nobody" },
   { contactId: "c-1", email: "other@example.org" },
-  "not-an-object",
 ];
 
-test("R1 one record per confirmed recipient with an address, the application's key; a recipient without an address is skipped", async () => {
+test("R1 one record per confirmed recipient, keyed by the contact or else by the address; a contact without an address is filed by its key alone", async () => {
   const { ports, calls } = makePorts({ list: listOf({ confirmedRecipients: R1_ROWS }) });
   const answer = await extensionTool({ input: { recipientsRef: " list-1 ", campaignId: "camp-1" }, ports });
   assert.deepEqual(calls.reads, [{ objectId: "list-1" }]);
   assert.deepEqual(calls.saves, [
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "contact:c-1", email: "Ann@Example.org", campaignId: "camp-1", confirmed: true } },
+    { type: RECIPIENT, data: { runId: BOUND, contactKey: "contact:c-2", campaignId: "camp-1", confirmed: true } },
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "email:cy@example.org", email: "Cy@Example.org", campaignId: "camp-1", confirmed: true } },
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "email:dee@example.org", email: "dee@example.org", campaignId: "camp-1", confirmed: true } },
   ]);
-  assert.ok(calls.saves.every((save) => typeof save.data.email === "string" && save.data.email.trim() !== ""));
-  assert.deepEqual(answer, { ok: true, filed: 3, skipped: 4, skippedWithoutAddress: 2 });
+  assert.equal(Object.hasOwn(calls.saves[1].data, "email"), false);
+  assert.deepEqual(answer, { ok: true, filed: 4, skipped: 1 });
   await whitespaceCases();
 });
 
@@ -93,25 +93,24 @@ async function whitespaceCases() {
       confirmedRecipients: [
         { contactId: "c-9", email: "   " },
         { contactId: "  ", email: "Zed@Example.org" },
-        new Row("c-class"),
-        new Date(0),
-        new Map([["contactId", "c-map"]]),
         bare,
       ],
     }),
   });
   const answer = await extensionTool({ input: { recipientsRef: "list-1" }, ports });
-  assert.equal(calls.saves[0].data.contactKey, "email:zed@example.org");
-  assert.equal(calls.saves[0].data.email, "Zed@Example.org");
-  assert.deepEqual(calls.saves.map((s) => s.data.contactKey), ["email:zed@example.org"]);
-  assert.deepEqual(answer, { ok: true, filed: 1, skipped: 5, skippedWithoutAddress: 2 });
+  assert.deepEqual(calls.saves.map((s) => s.data), [
+    { runId: BOUND, contactKey: "contact:c-9", confirmed: true },
+    { runId: BOUND, contactKey: "email:zed@example.org", email: "Zed@Example.org", confirmed: true },
+    { runId: BOUND, contactKey: "contact:c-bare", confirmed: true },
+  ]);
+  assert.deepEqual(answer, { ok: true, filed: 3, skipped: 0 });
 }
 
 test("R2 the recipients array is used alone; confirmedRecipients wins when both exist", async () => {
   const only = makePorts({ list: listOf({ recipients: [{ contactId: "r-1", email: "r1@example.org" }, { contactId: "r-2", email: "r2@example.org" }] }) });
   const a = await extensionTool({ input: { recipientsRef: "list-1" }, ports: only.ports });
   assert.deepEqual(only.calls.saves.map((s) => s.data.contactKey), ["contact:r-1", "contact:r-2"]);
-  assert.deepEqual(a, { ok: true, filed: 2, skipped: 0, skippedWithoutAddress: 0 });
+  assert.deepEqual(a, { ok: true, filed: 2, skipped: 0 });
 
   const both = makePorts({ list: listOf({ confirmedRecipients: [{ contactId: "w-1", email: "w1@example.org" }], recipients: [{ contactId: "l-1", email: "l1@example.org" }, { contactId: "l-2", email: "l2@example.org" }] }) });
   await extensionTool({ input: { recipientsRef: "list-1" }, ports: both.ports });
@@ -195,4 +194,29 @@ test("R8 no record holds a run or external key and no port but objects was used"
     assert.deepEqual(Object.keys(save), ["type", "data"]);
   }
   assert.deepEqual(everyOtherPort, []);
+});
+
+test("R9 a row that is not a recipient, or names neither a contact nor an address, refuses the call before any record is saved", async () => {
+  const refused = [
+    { name: "Nobody" },
+    { contactId: "  ", email: "   " },
+    { contactId: 7, recipientEmail: null },
+    "not-an-object",
+    null,
+    new Row("c-class"),
+    new Date(0),
+    new Map([["contactId", "c-map"]]),
+    ["c-array"],
+  ];
+  for (const row of refused) {
+    const { ports, calls } = makePorts({
+      list: listOf({ confirmedRecipients: [{ contactId: "a", email: "a@example.org" }, { contactId: "b" }, row] }),
+    });
+    let caught;
+    await extensionTool({ input: { recipientsRef: "list-1" }, ports }).catch((e) => { caught = e; });
+    assert.ok(caught, "the call is refused");
+    assertRefusal(caught);
+    assert.match(caught.message, /\b3\b/);
+    assert.equal(calls.saves.length, 0);
+  }
 });
