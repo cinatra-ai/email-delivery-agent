@@ -3,13 +3,14 @@
 //
 // The delivery flow calls this module through its recipient filing step. The
 // module reads the run's confirmed recipient list through the objects port,
-// then saves one record of the recipient type for each confirmed recipient
-// that has an address, one at a time and in list order. A record is keyed by
-// the contact when the row names one, else by the lower-cased address, and
-// always carries the address. A recipient without an address is not filed and
-// is counted as skipped for that reason, and a contact that an earlier row of
-// the same list already filed is not filed twice. Every row is checked before
-// the first record is saved.
+// then saves one record of the recipient type for each confirmed recipient,
+// one at a time and in list order. A record is keyed by the contact when the
+// row names one, else by the lower-cased address, and carries the address only
+// where the row has one, so a contact without an address is filed by its key
+// alone. A contact that an earlier row of the same list already filed is not
+// filed twice. Every row is checked before the first record is saved: a row
+// that is not a recipient, or names neither a contact nor an address, has no
+// key the recipient type accepts, so the call is refused and nothing is filed.
 //
 // Neither the run nor the scope is ever in this file: the host binds the run
 // where a record carries the marker { boundRun: true }, and the port scopes
@@ -58,19 +59,20 @@ export async function extensionTool({ input, ports }) {
   const filedKeys = new Set();
   const records = [];
   let skipped = 0;
-  let skippedWithoutAddress = 0;
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
+    const position = index + 1;
     if (!isPlainObject(row)) {
-      skipped += 1;
-      continue;
+      throw new ExtensionToolCallRefusal(
+        `Confirmed recipient ${position} of this run is not a recipient row, so no recipient record is filed for this run.`,
+      );
     }
     const address = trimmedOrNone(row.email ?? row.recipientEmail);
-    if (address === undefined) {
-      skipped += 1;
-      skippedWithoutAddress += 1;
-      continue;
-    }
     const contactId = trimmedOrNone(row.contactId);
+    if (contactId === undefined && address === undefined) {
+      throw new ExtensionToolCallRefusal(
+        `Confirmed recipient ${position} of this run names neither a contact nor an address, so no recipient record is filed for this run.`,
+      );
+    }
     const key = contactId !== undefined ? `contact:${contactId}` : `email:${address.toLowerCase()}`;
     if (filedKeys.has(key)) {
       skipped += 1;
@@ -78,7 +80,8 @@ export async function extensionTool({ input, ports }) {
     }
     filedKeys.add(key);
 
-    const data = { runId: { boundRun: true }, contactKey: key, email: address };
+    const data = { runId: { boundRun: true }, contactKey: key };
+    if (address !== undefined) data.email = address;
     if (campaignId !== undefined) data.campaignId = campaignId;
     data.confirmed = true;
     records.push(data);
@@ -90,5 +93,5 @@ export async function extensionTool({ input, ports }) {
     filed += 1;
   }
 
-  return { ok: true, filed, skipped, skippedWithoutAddress };
+  return { ok: true, filed, skipped };
 }
