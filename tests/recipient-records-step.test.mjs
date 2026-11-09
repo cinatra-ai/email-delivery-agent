@@ -21,7 +21,7 @@ const controlEdges = () =>
 const into = (id) => controlEdges().filter(([, to]) => to === id).map(([from]) => from);
 
 test("S1 the manifest declares the recipient_records tool and its module loads", async () => {
-  assert.deepEqual(pkg.cinatra.tools, [{ name: "recipient_records", module: MODULE_PATH }]);
+  assert.deepEqual(pkg.cinatra.tools, [{ name: "recipient_records", module: MODULE_PATH, embeddable: true }]);
   const { name, module } = pkg.cinatra.tools[0];
   assert.match(name, /^[a-z][a-z0-9_]*$/);
   assert.ok(module.startsWith("./"));
