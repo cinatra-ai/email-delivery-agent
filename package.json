@@ -1,6 +1,6 @@
 {
   "name": "@cinatra-ai/email-delivery-agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "license": "Apache-2.0",
   "files": [
     "cinatra"
@@ -45,7 +45,8 @@
     "tools": [
       {
         "name": "recipient_records",
-        "module": "./cinatra/tools/recipient-records.mjs"
+        "module": "./cinatra/tools/recipient-records.mjs",
+        "embeddable": true
       }
     ]
   },
