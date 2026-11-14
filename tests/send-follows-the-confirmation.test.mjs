@@ -1,7 +1,6 @@
 // ---------------------------------------------------------------------------
-// The send follows the confirmation — zero-dependency, runs under
-// `node --test tests/*.test.mjs`. cinatra-ai/cinatra#3745 (acceptance 5, the
-// pack's side).
+// The send follows the confirmation - zero-dependency, runs under
+// `node --test tests/*.test.mjs`. cinatra-ai/cinatra#3745 (the pack's side).
 //
 // A run of this agent sends mail on a person's behalf. The platform holds a
 // send until the person has decided, and it offers a step only the tools its
@@ -15,13 +14,26 @@
 //   2. The send step's tool offer is the flow's declaration. The host reads a
 //      model-bridge step's declaration from `metadata.cinatra.tools`. This
 //      flow declares none for any step today, so the host offers each step
-//      every tool it serves; the suite pins that reading, and pins that the
-//      tools the send step's own text calls are the primitives the manifest
-//      consumes plus the read tool, and that the step before the confirmation
-//      calls no send tool.
+//      every tool it serves. The suite pins that reading, and it reads the
+//      tool names every step's call data carries against explicit lists:
+//      a name that is not on a list fails, so a tool added to any step turns
+//      the suite red until the list names it. The send primitives on the
+//      send step's list are exactly the primitives the manifest consumes.
 //
-// These pins hold at the base: they guard it. Each test names the change that
+// The pins hold at the base: they guard it. Each test names the change that
 // turns it red.
+//
+// Known limits
+//   - A tool name is read as a snake_case word (it has an underscore) or as
+//     a name followed directly by "(". A tool named by one plain word with no
+//     parenthesis in the text is not seen. Every tool of this flow's
+//     vocabulary has an underscore.
+//   - Only the call data of ApiNode steps is read. A tool named in another
+//     kind of step is not seen.
+//   - The flow is read as its root flow. It has no nested flow today; a
+//     FlowNode or Flow component fails the first test.
+//   - The copy of the host's declaration reader below is checked against its
+//     rule as the PR describes it, not against the host's source.
 // ---------------------------------------------------------------------------
 
 import { test } from "node:test";
@@ -37,6 +49,7 @@ const pkg = readJson("package.json");
 
 const refOf = (r) => r?.$component_ref;
 const steps = oas.$referenced_components;
+const nodeIds = (oas.nodes ?? []).map(refOf);
 const edges = (oas.control_flow_connections ?? []).map((e) => ({
   from: refOf(e.from_node),
   to: refOf(e.to_node),
@@ -63,18 +76,29 @@ function reach(without = null) {
   return seen;
 }
 
-test("the steps this suite names are the ones the flow has", () => {
-  assert.equal(steps[PREPARE]?.component_type, "ApiNode");
-  assert.equal(steps[GATE]?.component_type, "InputMessageNode");
-  assert.equal(steps[FILING]?.component_type, "ApiNode");
-  assert.equal(steps[SEND]?.component_type, "ApiNode");
+test("the flow is one flat graph whose steps are the ones this suite names", () => {
+  assert.deepEqual([...nodeIds].sort(), Object.keys(steps).sort(), "a component is not a node of the flow, or a node has no component");
+  assert.ok(nodeIds.includes(refOf(oas.start_node)), "the start node is not a node of the flow");
+  for (const e of edges) {
+    assert.ok(nodeIds.includes(e.from) && nodeIds.includes(e.to), `an edge has an end that is not a node: ${e.from} -> ${e.to}`);
+  }
+  assert.deepEqual(
+    Object.values(steps).filter((c) => c.component_type === "Flow" || c.component_type === "FlowNode"),
+    [],
+    "the flow nests a flow, which this suite does not read",
+  );
+  assert.equal(steps[PREPARE].component_type, "ApiNode");
+  assert.equal(steps[GATE].component_type, "InputMessageNode");
+  assert.equal(steps[FILING].component_type, "ApiNode");
+  assert.equal(steps[SEND].component_type, "ApiNode");
+  assert.equal(steps[SUMMARY].component_type, "OutputMessageNode");
   assert.match(steps[SEND].url, /\/api\/llm-bridge$/);
   assert.match(steps[PREPARE].url, /\/api\/llm-bridge$/);
 });
 
 test("the send step is the only step of the flow with the send risk class", () => {
   const sending = Object.entries(steps)
-    .filter(([, c]) => c?.metadata?.cinatra?.riskClass === "email_send")
+    .filter(([, c]) => c.metadata?.cinatra?.riskClass === "email_send")
     .map(([id]) => id);
   assert.deepEqual(sending, [SEND]);
 });
@@ -93,7 +117,7 @@ test("the confirmation has one edge out, the affirmative one, and nothing routes
   assert.equal(out.length, 1, "the confirmation has more than one way out");
   assert.equal(out[0].to, FILING);
   assert.equal(out[0].branch, undefined, "the confirmation's edge is a named branch");
-  const branching = Object.entries(steps).filter(([, c]) => c?.component_type === "BranchingNode");
+  const branching = Object.entries(steps).filter(([, c]) => c.component_type === "BranchingNode");
   assert.deepEqual(branching.map(([id]) => id), [], "a step of the flow branches");
   // The one place the confirmation's answer goes is the end node.
   const readers = (oas.data_flow_connections ?? [])
@@ -115,6 +139,64 @@ test("after the send the run ends through the closing statement (red: an edge fr
   assert.deepEqual(outOf(SUMMARY).map((e) => e.to), ["end"]);
 });
 
+// -- the tool names a step's call data carries ------------------------------
+
+const TEMPLATE = /\{\{[\s\S]*?\}\}|\{#[\s\S]*?#\}/g;
+const SNAKE_NAME = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g;
+const CALLED_NAME = /\b([A-Za-z_][A-Za-z0-9_]*)\(/g;
+
+function stringsOf(value, out = []) {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) for (const v of value) stringsOf(v, out);
+  else if (value && typeof value === "object") for (const v of Object.values(value)) stringsOf(v, out);
+  return out;
+}
+
+/** Every tool-shaped name in a step's call data: its `tool`, every snake_case word and every name followed by "(" in its text. Template slots and comments are left out. */
+function namesIn(step) {
+  const names = new Set();
+  for (const raw of stringsOf(step.data ?? {})) {
+    const text = raw.replace(TEMPLATE, " ");
+    for (const m of text.matchAll(SNAKE_NAME)) names.add(m[0]);
+    for (const m of text.matchAll(CALLED_NAME)) names.add(m[1]);
+  }
+  if (typeof step.data?.tool === "string") names.add(step.data.tool);
+  return [...names].sort();
+}
+
+// The tools the send step's text may call: the read tool and the send
+// primitives. The send primitives are exactly the manifest's consumed
+// primitives (the next test reads them). A tool-shaped name outside this list
+// and the words list fails the suite until it is listed here.
+const SEND_STEP_TOOLS = ["email_outreach_send_initial_start", "email_outreach_send_initial_status", "objects_get"];
+// Snake_case words of the send step's text that are not tools.
+const SEND_STEP_WORDS = ["agent_run", "agent_run_id", "max_steps"];
+
+// What every other step of the flow names today. A tool-shaped name added to
+// one of them, or a step added or removed, fails the suite until this list is
+// changed in the same commit. None of these names is a send tool; a send tool
+// named by any step but the send step is therefore a name that is not on this
+// list.
+const OTHER_STEP_NAMES = {
+  [PREPARE]: ["objects_get"],
+  [FILING]: ["extension_tool", "recipient_records"],
+};
+
+test("the send step's text names the tools and words this suite lists and no other (red: any new snake_case name or name( call in the send step's call data)", () => {
+  assert.deepEqual(namesIn(steps[SEND]), [...SEND_STEP_TOOLS, ...SEND_STEP_WORDS].sort());
+});
+
+test("the send primitives on the send step's list are exactly the primitives the manifest consumes (red: a primitive consumed and not listed, or listed and not consumed)", () => {
+  const consumed = (pkg.cinatra.consumes ?? []).map((c) => c.primitive).sort();
+  assert.deepEqual(SEND_STEP_TOOLS.filter((n) => n !== "objects_get"), consumed);
+});
+
+test("every other step names the tools this suite lists for it and no other (red: a new tool-shaped name in a step's call data, a send tool before the confirmation, or a step added or removed)", () => {
+  const others = Object.entries(steps).filter(([id, c]) => c.component_type === "ApiNode" && id !== SEND);
+  assert.deepEqual(others.map(([id]) => id).sort(), Object.keys(OTHER_STEP_NAMES).sort());
+  for (const [id, step] of others) assert.deepEqual(namesIn(step), OTHER_STEP_NAMES[id], id);
+});
+
 // -- the send step's tool offer ---------------------------------------------
 
 /** The host's reading of a model-bridge step's declaration, `metadata.cinatra.tools`. */
@@ -133,44 +215,31 @@ function readDeclaration(node) {
   return { kind: "declared", tools: [...list] };
 }
 
-const callsOf = (node) => {
-  const text = `${node.data.system}\n${node.data.user}`;
-  return [...new Set(text.match(/\b(?:objects|email|gmail|social|linkedin|artifact|extension)_[a-z0-9_]+\b/g) ?? [])].sort();
-};
+const withTools = (tools) => ({ metadata: { cinatra: { tools } } });
+
+test("the copy of the host's declaration reader reads the cases its rule names", () => {
+  assert.deepEqual(readDeclaration({}), { kind: "undeclared" });
+  assert.deepEqual(readDeclaration({ metadata: { cinatra: {} } }), { kind: "undeclared" });
+  assert.deepEqual(readDeclaration(withTools([])), { kind: "declared", tools: [] });
+  assert.deepEqual(readDeclaration(withTools(["objects_get", "b_c"])), { kind: "declared", tools: ["objects_get", "b_c"] });
+  for (const bad of ["objects_get", null, [1], [""], ["  "], ["a b"], ["Objects_get"], ["a_b", "a_b"]]) {
+    assert.deepEqual(readDeclaration(withTools(bad)), { kind: "invalid" }, JSON.stringify(bad));
+  }
+});
 
 // What this flow declares for its model steps. Nothing is declared today, so
-// the host offers each step every tool it serves. Declaring a list for the
-// send step is a change of this constant in the same change (red: a `tools`
-// key on the send step).
+// the host offers each step every tool it serves. This is a change detector:
+// declaring a list for the send step changes this constant in the same commit.
 const SEND_STEP_DECLARATION = { kind: "undeclared" };
-// The tool names the send step's own text (system and user message) calls.
-const SEND_STEP_CALLS = ["email_outreach_send_initial_start", "email_outreach_send_initial_status", "objects_get"];
 
-test("the send step's declaration reads as this suite pins it", () => {
+test("the send and prepare steps' declarations read as this suite pins them (a change detector: red on a `tools` key on either step)", () => {
   assert.deepEqual(readDeclaration(steps[SEND]), SEND_STEP_DECLARATION);
   assert.deepEqual(readDeclaration(steps[PREPARE]), { kind: "undeclared" });
 });
 
-test("the send step's text calls the tools this suite names and no other (red: the text starts to call another tool)", () => {
-  assert.deepEqual(callsOf(steps[SEND]), [...SEND_STEP_CALLS].sort());
-});
-
-test("the send primitives the send step calls are the ones the manifest consumes (red: a consumed primitive the step does not call, or a send primitive the manifest does not name)", () => {
-  const consumed = (pkg.cinatra.consumes ?? []).map((c) => c.primitive).sort();
-  const calledSends = callsOf(steps[SEND]).filter((n) => n.startsWith("email_outreach_send_"));
-  assert.deepEqual(calledSends, consumed);
-});
-
-test("the step before the confirmation calls no send tool (red: a send tool named in the pre-send step)", () => {
-  assert.deepEqual(callsOf(steps[PREPARE]), ["objects_get"]);
-});
-
-test("no step but the confirmed send names a send tool (red: a passthrough step that names one)", () => {
-  const SEND_TOOL = /\b(?:email_send|gmail_email_send|email_outreach_send_[a-z_]+|social_media_publish|linkedin_post_publish)\b/g;
-  const named = [];
-  for (const [id, comp] of Object.entries(steps)) {
-    if (id === SEND || comp?.component_type !== "ApiNode") continue;
-    for (const hit of JSON.stringify(comp.data ?? {}).match(SEND_TOOL) ?? []) named.push(`${id}: ${hit}`);
-  }
-  assert.deepEqual(named, []);
+test("when the send step declares a list it is exactly the tools its text lists (vacuous while the step declares none)", () => {
+  const reading = readDeclaration(steps[SEND]);
+  if (reading.kind === "undeclared") return;
+  assert.equal(reading.kind, "declared");
+  assert.deepEqual([...reading.tools].sort(), SEND_STEP_TOOLS);
 });
