@@ -743,7 +743,12 @@
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
           "a2uiSurfaceId": "email-delivery:step-1:output",
-          "description": "Single ApiNode → /api/llm-bridge. Runs ONLY after the confirmation_gate approval. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive, unchanged). metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false HERE because the human approval is enforced structurally by the upstream confirmation_gate, not by re-gating the send."
+          "description": "Single ApiNode → /api/llm-bridge. Runs ONLY after the confirmation_gate approval. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive, unchanged). metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false HERE because the human approval is enforced structurally by the upstream confirmation_gate, not by re-gating the send.",
+          "tools": [
+            "email_outreach_send_initial_start",
+            "email_outreach_send_initial_status",
+            "objects_get"
+          ]
         }
       }
     },
