@@ -12,13 +12,15 @@
 //      nothing routes on its answer, so every other outcome has no edge to
 //      follow and the run ends at the confirmation.
 //   2. The send step's tool offer is the flow's declaration. The host reads a
-//      model-bridge step's declaration from `metadata.cinatra.tools`. This
-//      flow declares none for any step today, so the host offers each step
-//      every tool it serves. The suite pins that reading, and it reads the
-//      tool names every step's call data carries against explicit lists:
-//      a name that is not on a list fails, so a tool added to any step turns
-//      the suite red until the list names it. The send primitives on the
-//      send step's list are exactly the primitives the manifest consumes.
+//      model-bridge step's declaration from `metadata.cinatra.tools`. The
+//      send step declares the tools its recipe calls and no other, so the
+//      host offers it exactly those; the prepare step declares none. The
+//      suite pins that reading, and it reads the tool names every step's call
+//      data carries against explicit lists: a name that is not on a list
+//      fails, so a tool added to any step turns the suite red until the list
+//      names it. The send primitives on the send step's list are exactly the
+//      primitives the manifest consumes, and the declared list is exactly the
+//      tools the send step's text calls.
 //
 // The pins hold at the base: they guard it. Each test names the change that
 // turns it red.
@@ -227,19 +229,35 @@ test("the copy of the host's declaration reader reads the cases its rule names",
   }
 });
 
-// What this flow declares for its model steps. Nothing is declared today, so
-// the host offers each step every tool it serves. This is a change detector:
-// declaring a list for the send step changes this constant in the same commit.
-const SEND_STEP_DECLARATION = { kind: "undeclared" };
+// What this flow declares for its model steps. The send step declares the
+// tools its recipe calls, so the host offers it those and no other; the
+// prepare step declares nothing. This is a change detector: a change of the
+// send step's list changes this constant in the same commit.
+const SEND_STEP_DECLARATION = { kind: "declared", tools: SEND_STEP_TOOLS };
 
-test("the send and prepare steps' declarations read as this suite pins them (a change detector: red on a `tools` key on either step)", () => {
+test("the send and prepare steps' declarations read as this suite pins them (a change detector: red on a changed list on the send step, or a `tools` key on the prepare step)", () => {
   assert.deepEqual(readDeclaration(steps[SEND]), SEND_STEP_DECLARATION);
   assert.deepEqual(readDeclaration(steps[PREPARE]), { kind: "undeclared" });
 });
 
-test("when the send step declares a list it is exactly the tools its text lists (vacuous while the step declares none)", () => {
+test("the send step's declared list is exactly the tools its text calls (red: no list, a tool the text calls and the list lacks, or a tool the list holds and the text does not call)", () => {
   const reading = readDeclaration(steps[SEND]);
-  if (reading.kind === "undeclared") return;
-  assert.equal(reading.kind, "declared");
+  assert.equal(reading.kind, "declared", "the send step declares no list");
   assert.deepEqual([...reading.tools].sort(), SEND_STEP_TOOLS);
+  const called = namesIn(steps[SEND]).filter((name) => !SEND_STEP_WORDS.includes(name));
+  assert.deepEqual([...reading.tools].sort(), called);
+});
+
+test("the list is written in the form the host reads and sits on a model-bridge step only (red: a `tools` key on a step that is not a model step)", () => {
+  const withKey = Object.entries(steps)
+    .filter(([, c]) => Object.hasOwn(c.metadata?.cinatra ?? {}, "tools"))
+    .map(([id]) => id);
+  assert.deepEqual(withKey, [SEND]);
+  assert.match(steps[SEND].url, /\/api\/llm-bridge$/);
+  assert.equal(steps[SEND].id, SEND, "the host reads a declaration by the step's id");
+  assert.deepEqual(
+    Object.values(steps).filter((c) => c.id === SEND).length,
+    1,
+    "two steps share the send step's id",
+  );
 });
