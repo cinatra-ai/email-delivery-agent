@@ -51,3 +51,11 @@ test("the step's description names the preview tool and both outputs", () => {
   assert.match(text, /contentDigest/);
   assert.match(text, /summary/);
 });
+
+test("the step's description reads all three records and reports an unreadable count as 0, as its text says", () => {
+  assert.match(prepare.data.system, /MUST objects_get ALL THREE records/);
+  const text = prepare.metadata.cinatra.description;
+  assert.doesNotMatch(text, /optionally/i, "the description calls a read optional that the text requires");
+  assert.match(text, /Reads all three records/);
+  assert.match(text, /a count of 0 when a ref cannot be read/);
+});
