@@ -178,9 +178,11 @@ const SEND_STEP_WORDS = ["agent_run", "agent_run_id", "max_steps"];
 // one of them, or a step added or removed, fails the suite until this list is
 // changed in the same commit. None of these names is a send tool; a send tool
 // named by any step but the send step is therefore a name that is not on this
-// list.
+// list. The prepare step's second name is the read-only preview of the send
+// (cinatra-ai/cinatra#3745): it sends nothing and returns the counts and the
+// content digest that the confirmation carries.
 const OTHER_STEP_NAMES = {
-  [PREPARE]: ["objects_get"],
+  [PREPARE]: ["email_outreach_send_initial_preview", "objects_get"],
   [FILING]: ["extension_tool", "recipient_records"],
 };
 
