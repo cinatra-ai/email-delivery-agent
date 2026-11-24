@@ -81,18 +81,19 @@ test("6a — a consumer edge produces nothing and binds nothing", () => {
   assert.deepEqual(bindings, []);
 });
 
-test("6a — the send confirmation is the one pause this agent has", () => {
-  assert.equal(cinatra.hasApprovalGates, true);
-  assert.ok(approvalNodes(oas).length >= 1);
+// The send is an external write: the application stops the run in front of it
+// and shows its publish card, so the agent keeps no pause of its own.
+test("6a — the agent declares no pause of its own; the publish card holds the send", () => {
+  assert.equal(cinatra.hasApprovalGates, false);
+  assert.deepEqual(approvalNodes(oas), []);
+  assert.equal(components.send.metadata.cinatra.publishes, true);
 });
 
 // 6d — every pause an agent has is declared and every declared pause exists.
 // The send renderer is the screen the send step carries, not a hold: the run
 // never stops on it, so declaring it as a pause promised a stop that never
-// comes.
-test("6d — the declared pauses are exactly the pauses the flow has", () => {
-  assert.deepEqual(oas.metadata.cinatra.hitlScreens, [
-    "@cinatra-ai/email-delivery-agent:send-confirmation",
-  ]);
-  assert.deepEqual(approvalNodes(oas), ["approval_gate"]);
+// comes. The flow has no pause of its own, so it declares none.
+test("6d — the declared pauses are exactly the pauses the flow has: none", () => {
+  assert.equal(Object.hasOwn(oas.metadata.cinatra, "hitlScreens"), false);
+  assert.deepEqual(approvalNodes(oas), []);
 });

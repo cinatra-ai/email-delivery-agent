@@ -70,31 +70,35 @@ test("S2 the file_recipients component has the declared shape", () => {
         riskClass: "write",
         requiresApproval: false,
         packageName: "@cinatra-ai/email-delivery-agent",
+        publishes: false,
       },
     },
   });
 });
 
-test("S3 the step is listed directly after the confirmation", () => {
+test("S3 the step is listed directly after the prepare step and directly before the send", () => {
   const ids = oas.nodes.map((n) => n.$component_ref);
-  assert.ok(ids.indexOf("approval_gate") < ids.indexOf("file_recipients"));
-  assert.equal(ids[ids.indexOf("approval_gate") + 1], "file_recipients");
+  assert.equal(ids[ids.indexOf("prepare") + 1], "file_recipients");
   assert.equal(ids[ids.indexOf("file_recipients") + 1], "send");
 });
 
-test("S4 the edge list puts the confirmation before the filing step, and the filing step before the send", () => {
+test("S4 the edge list puts the filing step directly before the send", () => {
   const edges = controlEdges().map(([a, b]) => `${a} -> ${b}`);
   assert.deepEqual(edges, [
     "start -> prepare",
-    "prepare -> approval_gate",
-    "approval_gate -> file_recipients",
+    "prepare -> file_recipients",
     "file_recipients -> send",
     "send -> delivery_summary",
     "delivery_summary -> end",
   ]);
-  assert.deepEqual(into("approval_gate"), ["prepare"]);
-  assert.deepEqual(into("file_recipients"), ["approval_gate"]);
+  assert.deepEqual(into("file_recipients"), ["prepare"]);
   assert.deepEqual(into("send"), ["file_recipients"]);
+});
+
+test("S4b the filing step declares that it makes no external write, and the send is the flow's one publishing step", () => {
+  assert.equal(byId("file_recipients").metadata.cinatra.publishes, false);
+  const publishing = componentList.filter((c) => c.metadata?.cinatra?.publishes === true).map((c) => c.id);
+  assert.deepEqual(publishing, ["send"]);
 });
 
 test("S5 the data edges into file_recipients are the three start inputs, each once", () => {
@@ -108,7 +112,7 @@ test("S5 the data edges into file_recipients are the three start inputs, each on
   ]);
 });
 
-test("S7 no path from start reaches the filing step or the send without passing the confirmation", () => {
+test("S7 no path from start reaches the send without passing the filing step", () => {
   const edges = controlEdges();
   const reach = (blocked) => {
     const seen = new Set();
@@ -124,9 +128,7 @@ test("S7 no path from start reaches the filing step or the send without passing 
   const open = reach(null);
   assert.ok(open.has("file_recipients"));
   assert.ok(open.has("send"));
-  const gated = reach("approval_gate");
-  assert.ok(!gated.has("file_recipients"));
-  assert.ok(!gated.has("send"));
+  assert.ok(!reach("file_recipients").has("send"));
 });
 
 test("S6 the module names no run or external key and imports nothing", () => {

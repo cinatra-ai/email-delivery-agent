@@ -49,7 +49,7 @@ test("(19) the run ends in plain language after the send, never in the envelope"
   assert.ok(hasEdge("send", "delivery_summary"), "the send does not lead to the closing statement");
   assert.ok(hasEdge("delivery_summary", "end"), "the closing statement does not lead to the end");
   assert.ok(!hasEdge("send", "end"), "the run still jumps from the send straight to its end");
-  assert.deepEqual(refs.end.outputs.map((o) => o.title), ["sendResult", "userResponse"]);
+  assert.deepEqual(refs.end.outputs.map((o) => o.title), ["sendResult"]);
 });
 
 test("(19) an empty, failed or finished send ends in the sentence as written", () => {
@@ -70,11 +70,11 @@ test("(19) every failure code the send step names has its own sentence", () => {
   for (const code of codes) assert.ok(message.includes(`sendResult.errorCode == '${code}'`), `no sentence for ${code}`);
 });
 
-test("(19) the closing statement follows the send, and the send still follows the confirmation alone", () => {
+test("(19) the closing statement follows the send, and the send follows the filing step alone", () => {
   const into = (id) => controlEdges.filter((e) => e.to === id).map((e) => e.from).sort();
   assert.deepEqual(into("delivery_summary"), ["send"]);
   assert.deepEqual(into("send"), ["file_recipients"]);
-  assert.deepEqual(into("file_recipients"), ["approval_gate"]);
+  assert.deepEqual(into("file_recipients"), ["prepare"]);
   assert.deepEqual(into("end"), ["delivery_summary"]);
 });
 

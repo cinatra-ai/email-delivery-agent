@@ -1,6 +1,6 @@
 {
   "name": "@cinatra-ai/email-delivery-agent",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "Apache-2.0",
   "files": [
     "cinatra"
@@ -39,7 +39,7 @@
     "sourceVersionId": "14875cc4-d56b-4995-ac53-56efbe33daf0",
     "sourceVersionNumber": 1,
     "riskLevel": "low",
-    "hasApprovalGates": true,
+    "hasApprovalGates": false,
     "toolAccess": [],
     "ownerOrgId": null,
     "tools": [

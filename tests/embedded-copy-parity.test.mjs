@@ -13,16 +13,25 @@
 // with equal scalar values. Extra keys and extra entries are allowed: this flow
 // keeps its own read-only prepare step, the summary the confirmation shows,
 // its closing sentence after the send and its end with its typed defaults.
-// This flow also files the recipient records between its confirmation and its send, a step of its own the copy does not carry yet.
+// This flow also files the recipient records in front of its send, a step of its own the copy does not carry yet.
+//
+// The copy still carries the confirmation step this flow had (approval_gate),
+// its edges and its answer (the output userResponse). This flow no longer has
+// them: sending an email is an external write, so the application stops the
+// run in front of the send and shows its publish card, and the flow draws no
+// confirmation of its own (cinatra-ai/cinatra#3745). The copy's confirmation
+// step, every edge that starts or ends at it and the answer output are left
+// out of the comparison until the outreach pack re-embeds this flow; the
+// suite send-follows-the-publish-decision holds that this flow has none.
 //
 // Three paths are not compared, and each is held another way:
 // - send.data.system and send.data.user, the send step's prompt texts: this
 //   flow keeps its own, which name the send and status tools; the declared
 //   outputs they name are compared.
 // - send.metadata.cinatra.requiresApproval: the copy says true, this flow keeps
-//   false. The confirmation gate is this agent's one pause and the send step's
-//   screen is not a hold (cinatra-ai/cinatra#3094); the arm "6d - the declared
-//   pauses are exactly the pauses the flow has" holds that.
+//   false. The publish card is the one approval in front of the send and the
+//   send step's screen is not a hold (cinatra-ai/cinatra#3094); the arm "6d -
+//   the declared pauses are exactly the pauses the flow has" holds that.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -47,6 +56,11 @@ function strip(value) {
   return typeof value === "string" ? unprefix(value) : value;
 }
 
+/** The copy's confirmation step and its answer, which this flow no longer has (see the header). */
+const GONE_STEP = "approval_gate";
+const GONE_OUTPUT = "userResponse";
+const touchesGoneStep = (edge) => edge.split(" -> ").some((end) => end.split(".")[0].split("[")[0] === GONE_STEP);
+
 const copy = strip(rawCopy);
 const refs = oas.$referenced_components ?? {};
 const copyRefs = copy.$referenced_components ?? {};
@@ -58,11 +72,13 @@ function copyList(key) {
   return list;
 }
 
-/** The three paths held another way, as the header says. */
+/** The three paths held another way, and the end node's answer that this flow no longer has, as the header says. */
 const SKIPPED = new Set([
   "send.data.system",
   "send.data.user",
   "send.metadata.cinatra.requiresApproval",
+  // The confirmation's answer at the end node, gone with the confirmation (see the header).
+  "end.outputs[userResponse]",
 ]);
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -79,6 +95,7 @@ function contains(have, want, path, missing) {
     }
     if (isTitledList(want)) {
       for (const entry of want) {
+        if (SKIPPED.has(`${path}[${entry.title}]`)) continue;
         const found = have.find((candidate) => isObject(candidate) && candidate.title === entry.title);
         if (!found) missing.push(`${path}[${entry.title}]`);
         else contains(found, entry, `${path}[${entry.title}]`, missing);
@@ -124,6 +141,7 @@ test("(7) every step of the embedded copy is a step of this flow, carrying all i
   const listed = new Set((oas.nodes ?? []).map((n) => n.$component_ref));
   const missing = [];
   for (const { $component_ref: id } of copyList("nodes")) {
+    if (id === GONE_STEP) continue;
     if (!listed.has(id)) missing.push(`${id}: not a step of this flow`);
     if (!refs[id]) {
       missing.push(`${id}: not defined in this flow`);
@@ -137,32 +155,29 @@ test("(7) every step of the embedded copy is a step of this flow, carrying all i
 test("(7) the flow takes every input and hands on every output the copy does", () => {
   const missing = [];
   contains(oas.inputs ?? [], copyList("inputs"), "inputs", missing);
-  contains(oas.outputs ?? [], copyList("outputs"), "outputs", missing);
+  contains(oas.outputs ?? [], copyList("outputs").filter((o) => o.title !== GONE_OUTPUT), "outputs", missing);
   assert.deepEqual(missing, [], "this flow lacks the copy's inputs or outputs: " + missing.join("; "));
 });
 
 test("(7) every data edge of the copy is a data edge of this flow", () => {
   copyList("data_flow_connections");
   const have = dataEdgesOf(oas);
-  const missing = [...dataEdgesOf(copy)].filter((edge) => !have.has(edge));
+  const missing = [...dataEdgesOf(copy)].filter((edge) => !touchesGoneStep(edge)).filter((edge) => !have.has(edge));
   assert.deepEqual(missing, [], "this flow lacks the copy's data edges: " + missing.join("; "));
 });
 
-test("(7) every control edge of the copy is one of this flow, but the summary before the confirmation and the closing sentence after the send", () => {
+test("(7) every control edge of the copy is one of this flow, but the confirmation step's and the closing sentence after the send", () => {
   copyList("control_flow_connections");
   const have = controlEdgesOf(oas);
-  // The copy's start goes straight to its gate; this flow's start goes to its
-  // read-only prepare step, whose summary the confirmation shows. The copy's
-  // send goes straight to its end; this flow's send goes on to its closing
-  // sentence and then to its end.
+  // The copy's start goes to its confirmation step, which this flow no longer
+  // has; this flow's start goes to its read-only prepare step and then to the
+  // filing step in front of the send. The copy's send goes straight to its end;
+  // this flow's send goes on to its closing sentence and then to its end.
   const missing = [...controlEdgesOf(copy)]
-    .filter((edge) => edge !== "start -> approval_gate")
+    .filter((edge) => !touchesGoneStep(edge))
     .filter((edge) => edge !== "send -> end")
-    // The copy's confirmation goes straight to its send; this flow files the
-    // recipient records between the two.
-    .filter((edge) => edge !== "approval_gate -> send")
     .filter((edge) => !have.has(edge));
-  for (const edge of ["start -> prepare", "prepare -> approval_gate", "approval_gate -> file_recipients", "file_recipients -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
+  for (const edge of ["start -> prepare", "prepare -> file_recipients", "file_recipients -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
     if (!have.has(edge)) missing.push(edge);
   }
   assert.deepEqual(missing, [], "this flow lacks the copy's control edges: " + missing.join("; "));
