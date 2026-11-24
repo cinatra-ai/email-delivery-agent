@@ -8,6 +8,14 @@
 // src/lib/trigger-email-send-use-cases.ts at c35e539a6, runInitialSend: the
 // drafts under `drafts`, the address from recipientEmailFor, the body as
 // `draft.body ?? draft.bodyHtml ?? ""`, a draft without an address not mailed).
+//
+// What these arms prove about the recipients: the card lists the addresses the
+// send start hands to the email pipeline for the drafts of the bundle and the
+// list. They do not prove whom the pipeline finally mails. When the workspace's
+// development-mode recipient override is on, the pipeline replaces every
+// address with the configured override address (and empties cc and bcc); no
+// port of this module can read that setting, so the copy below models the send
+// start only, up to the address it hands on.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -86,7 +94,7 @@ function ports({ objects = { [LIST_REF]: LIST, [BUNDLE_REF]: BUNDLE }, texts = T
 const call = (input, p = ports()) => extensionTool({ input, ports: p });
 const fullInput = (emailBodies = JSON.stringify(BODIES), callToAction = CALL_TO_ACTION) => ({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies, callToAction });
 
-/** A copy of the send start's reading: who it mails, with which body. */
+/** A copy of the send start's reading: the address it hands on for each draft, with which body (before any override of the pipeline). */
 function sendMails(bundle, list) {
   const recipients = list.data.confirmedRecipients ?? list.data.recipients ?? [];
   const drafts = bundle.data.drafts ?? bundle.data.confirmedRecipients ?? [];
@@ -138,7 +146,7 @@ test("the card's recipients and bodies are exactly the drafts the send mails, fr
     callToAction: CALL_TO_ACTION,
   });
   const mails = sendMails(BUNDLE, LIST);
-  assert.deepEqual(answer.recipients.map((r) => r.email), mails.map((m) => m.to), "the card lists whom the send mails");
+  assert.deepEqual(answer.recipients.map((r) => r.email), mails.map((m) => m.to), "the card lists the addresses the send start addresses, from the bundle and the list");
   const shown = answer.emailBodies.map((b) => TEXTS[b.artifactId].replace(/\s+$/, ""));
   assert.deepEqual(shown, mails.map((m) => m.body.replace(/\s+$/, "")), "the card shows the bodies the send mails");
 });

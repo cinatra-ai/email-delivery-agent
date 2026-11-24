@@ -9,7 +9,7 @@ The final send step of an outreach campaign. Connect your Gmail account in works
 
 ## Capabilities
 
-- Send an approved outreach campaign through your connected email provider, after you decide on the send on the application's publish card, which shows the sending mailbox, the recipients, the emails and the call to action
+- Send an approved outreach campaign through your connected email provider, after you decide on the send on the application's publish card, which shows the sending mailbox, the recipients, the emails and the call to action; the recipients are the real addressees, so with the dev-mode redirect on the card does not show the override recipient that gets the mail
 - Ask only for the sender email address, its one required input, drawn with the Email Outreach Agent's sender picker when that agent is installed; the campaign ID, the approved draft bundle reference, the confirmed recipients reference and the values the publish card shows (the recipients, the email bodies and the call to action) are handed in by the orchestrating agent
 - Start the send without a model step: its arguments are the run's own values, including the approved email bodies the card showed
 - End with one plain sentence on how many messages went out or, on a failure, what stopped the send

@@ -10,7 +10,11 @@
 // through the objects port and gives the send step:
 //   - the recipients the send mails: one line per draft that has an address,
 //     with the address chosen as the send chooses it (the draft's own address,
-//     else the address of the confirmed recipient with the draft's contact);
+//     else the address of the confirmed recipient with the draft's contact).
+//     This is the address the send start hands to the email pipeline. When the
+//     workspace's development-mode recipient override is on, the pipeline mails
+//     the override address instead; no port of this module can read that
+//     setting, so the list does not show it;
 //   - the approved body of each of those drafts, as the artifact revision the
 //     run hands in and the contact of its draft (the draft's contactId, else
 //     its recipientId): the value the send step passes to the send start as

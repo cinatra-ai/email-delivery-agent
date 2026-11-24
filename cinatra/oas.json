@@ -805,7 +805,7 @@
         {
           "title": "recipients",
           "type": "array",
-          "description": "One line per draft the send mails: the name, the address the send mails it to, and the company.",
+          "description": "One line per draft the send mails: the name, the address the send start addresses it to, and the company. When the workspace's development-mode recipient override is on, the email pipeline mails the override address instead; this list does not show it.",
           "json_schema": {
             "type": "array",
             "items": {
@@ -919,7 +919,7 @@
         {
           "title": "recipients",
           "type": "array",
-          "description": "The recipients the send mails, as the read step resolved them from the approved draft bundle and the confirmed recipient list: one line per mailed draft with its name, email and company",
+          "description": "The recipients the send mails, as the read step resolved them from the approved draft bundle and the confirmed recipient list: one line per mailed draft with its name, email and company. These are the addresses the send start addresses; when the workspace's development-mode recipient override is on, the email pipeline mails the override address instead, which the card's Recipients row does not show",
           "json_schema": {
             "type": "array",
             "items": {
