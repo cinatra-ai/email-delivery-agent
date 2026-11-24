@@ -352,7 +352,7 @@ test("the copy of the host's declaration reader reads the cases its rule names",
 });
 
 // The host reads `metadata.cinatra.tools` on a model-bridge step only and
-// refuses the key on any other step (OAS-RUNTIME-015). The flow's one model
+// refuses the key on any other step. The flow's one model
 // step, the prepare step, declares nothing, and the send step is no model step,
 // so no step of the flow carries the key and no model step is offered the send.
 test("no step declares a tool list, and the one model step is the read-only prepare step (red: a `tools` key on any step, or a second model step)", () => {
