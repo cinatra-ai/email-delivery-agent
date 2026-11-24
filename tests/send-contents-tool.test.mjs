@@ -129,7 +129,10 @@ test("the card's recipients and bodies are exactly the drafts the send mails, fr
       { name: "Ada Lovelace", email: "ada@example.com", company: "Example One" },
       { name: "Ben Hill", email: "ben@example.com", company: "Example Two" },
     ],
-    emailBodies: [BODIES[0], BODIES[1]],
+    emailBodies: [
+      { ...BODIES[0], contactId: "c-1" },
+      { ...BODIES[1], contactId: "c-2" },
+    ],
   });
   const mails = sendMails(BUNDLE, LIST);
   assert.deepEqual(answer.recipients.map((r) => r.email), mails.map((m) => m.to), "the card lists whom the send mails");

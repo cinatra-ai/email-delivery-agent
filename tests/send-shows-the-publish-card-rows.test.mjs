@@ -47,10 +47,12 @@ const SEND = "send";
 const READ = "resolve_send";
 const READ_TOOL = "send_contents";
 const PREPARE = "prepare";
-const ARGUMENTS = ["approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "contentDigest", "senderEmail"];
+// The send start's arguments; approvedBodies is the list the Emails row shows, rendered from the send step's emailBodies.
+const ARGUMENTS = ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"];
+const ARGUMENT_SOURCE = { approvedBodies: "emailBodies | tojson" };
 const ROW_INPUTS = ["senderEmail", "recipients", "emailBodies", "callToAction"];
-// The card's own inputs, which only the card reads (senderEmail is also an argument of the send).
-const CARD_INPUTS = ["recipients", "emailBodies", "callToAction"];
+// The card's own inputs, which only the card reads (senderEmail and emailBodies are also arguments of the send).
+const CARD_INPUTS = ["recipients", "callToAction"];
 
 const EXPECTED_ROWS = [
   { label: "From", input: "senderEmail" },
@@ -173,11 +175,11 @@ test("no input the card shows has a default, so a run without it does not start 
 });
 
 test("the card's values are typed for their rows", () => {
-  for (const owner of [refs[SEND], refs[READ]]) {
-    const bodies = inputOf(owner, "emailBodies") ?? (owner.outputs ?? []).find((entry) => entry.title === "emailBodies");
+  for (const bodies of [inputOf(refs[SEND], "emailBodies"), (refs[READ].outputs ?? []).find((entry) => entry.title === "emailBodies")]) {
     assert.equal(bodies.type, "array");
-    // The shape an artifacts row reads: a list of { artifactId, representationRevisionId }.
-    assert.deepEqual(bodies.json_schema.items.required, ["artifactId", "representationRevisionId"]);
+    // The shape an artifacts row reads, a list of { artifactId, representationRevisionId }, with the contact the
+    // send start joins each body on.
+    assert.deepEqual(bodies.json_schema.items.required, ["artifactId", "representationRevisionId", "contactId"]);
   }
   const recipients = [inputOf(refs[SEND], "recipients"), (refs[READ].outputs ?? []).find((entry) => entry.title === "recipients")];
   for (const entry of recipients) {
@@ -203,7 +205,9 @@ test("the prepare step takes the digest from the read-only preview tool and neve
   const output = (prepare.outputs ?? []).find((entry) => entry.title === "contentDigest");
   assert.ok(output, "the prepare step declares no contentDigest output");
   assert.equal(output.type, "string");
-  assert.equal(sourceOf(SEND, "contentDigest"), `${PREPARE}.contentDigest`);
+  // The digest is the prepare step's own output; the send start mails the approved bodies and takes no digest.
+  assert.equal(inputOf(refs[SEND], "contentDigest"), undefined);
+  assert.ok(!dataEdges.some((e) => refOf(e.source_node) === PREPARE && e.source_output === "contentDigest"));
   const system = prepare.data.system;
   assert.ok(system.includes(PREVIEW_TOOL), "the prepare text does not name the preview tool");
   assert.ok(system.includes('"contentDigest"'), "the prepare text does not name the contentDigest key");
@@ -225,7 +229,8 @@ test("the send texts name the five arguments and no other key, and name the publ
   assert.ok(system.includes("Leave out a key whose input is empty"), "the send text does not say how an empty value is passed");
   assert.ok(!system.includes("pass JSON null"), "the send text still passes null for an empty value");
   for (const name of ARGUMENTS) {
-    assert.ok(user.includes(`- ${name}: {{ ${name} }}`), `the send's input text carries no line for ${name}`);
+    const source = ARGUMENT_SOURCE[name] ?? name;
+    assert.ok(user.includes(`- ${name}: {{ ${source} }}`), `the send's input text carries no line for ${name}`);
   }
   assert.ok(!system.includes(PREVIEW_TOOL), "the send text names the preview tool, which the step does not offer");
   assert.ok(system.includes("publish card"), "the send text does not name the publish card");

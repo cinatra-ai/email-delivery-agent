@@ -39,7 +39,7 @@ const dataEdges = (oas.data_flow_connections ?? []).map((e) => [
 const countDataEdges = (from, to) => dataEdges.filter(([f, t]) => f === from && t === to).length;
 const outsideComment = (message) => String(message ?? "").replace(/\{#[\s\S]*?#\}/g, "");
 
-const MESSAGE = "{# pyagentspec-input-hint (do not remove): {{ sendResult }} #}{% if not sendResult or not sendResult.status %}No campaign email was sent in this run.{% elif sendResult.status == 'completed' %}{% if sendResult.totalSent == 1 %}1 campaign email was sent{% elif sendResult.totalSent %}{{ sendResult.totalSent }} campaign emails were sent{% else %}The send finished, but no campaign email went out{% endif %}{% if sendResult.totalFailed %}, and {{ sendResult.totalFailed }} could not be sent{% endif %}.{% elif sendResult.errorCode == 'OBJECTS_FETCH_FAILED' %}No campaign email was sent: the approved drafts or the confirmed recipients could not be read.{% elif sendResult.errorCode == 'POLL_BUDGET_EXHAUSTED' %}The send did not report its end in time, so it is not known how many campaign emails went out; check the campaign before you send again.{% elif sendResult.errorMessage %}The campaign emails could not be sent: {{ sendResult.errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}";
+const MESSAGE = "{# pyagentspec-input-hint (do not remove): {{ sendResult }} #}{% if not sendResult or not sendResult.status %}No campaign email was sent in this run.{% elif sendResult.status == 'completed' %}{% if sendResult.totalSent == 1 %}1 campaign email was sent{% elif sendResult.totalSent %}{{ sendResult.totalSent }} campaign emails were sent{% else %}The send finished, but no campaign email went out{% endif %}{% if sendResult.totalFailed %}, and {{ sendResult.totalFailed }} could not be sent{% endif %}.{% elif sendResult.errorCode == 'OBJECTS_FETCH_FAILED' %}No campaign email was sent: the approved drafts or the confirmed recipients could not be read.{% elif sendResult.errorCode == 'APPROVED_BODIES_MISSING' %}No campaign email was sent: the approved email bodies the publish card showed did not reach the send.{% elif sendResult.errorCode == 'POLL_BUDGET_EXHAUSTED' %}The send did not report its end in time, so it is not known how many campaign emails went out; check the campaign before you send again.{% elif sendResult.errorMessage %}The campaign emails could not be sent: {{ sendResult.errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}";
 
 test("(19) the run ends in plain language after the send, never in the envelope", () => {
   const summary = refs.delivery_summary;
@@ -65,7 +65,7 @@ test("(19) an empty, failed or finished send ends in the sentence as written", (
 test("(19) every failure code the send step names has its own sentence", () => {
   const system = String(refs.send.data.system ?? "");
   const codes = [...new Set([...system.matchAll(/errorCode[^A-Za-z]{1,6}([A-Z][A-Z0-9_]+)/g)].map((m) => m[1]))].sort();
-  assert.deepEqual(codes, ["OBJECTS_FETCH_FAILED", "POLL_BUDGET_EXHAUSTED"]);
+  assert.deepEqual(codes, ["APPROVED_BODIES_MISSING", "OBJECTS_FETCH_FAILED", "POLL_BUDGET_EXHAUSTED"]);
   const message = String(refs.delivery_summary?.message ?? "");
   for (const code of codes) assert.ok(message.includes(`sendResult.errorCode == '${code}'`), `no sentence for ${code}`);
 });
