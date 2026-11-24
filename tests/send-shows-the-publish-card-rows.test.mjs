@@ -12,7 +12,8 @@
 //   - Emails: the approved email bodies, the artifact revisions the run made
 //     (an artifacts row over emailBodies);
 //   - Call to action: the call to action of the emails (a text row over
-//     callToAction).
+//     callToAction), as the read step hands it on: the read step hands on the
+//     caller's call to action only when every mailed body carries it.
 // There is no campaign row: a campaign id is an internal identifier.
 //
 // These arms hold that the declaration has the form the host's compiler reads
@@ -126,24 +127,26 @@ test("no row shows an internal identifier (red: a row over the campaign, a refer
 });
 
 test("the card's rows and the send's references trace to one source (red: a row fed from the start node past the read step, or the read step and the send reading different references)", () => {
-  // The From row is the sender the send start takes; the call to action is the flow's input.
+  // The From row is the sender the send start takes.
   assert.equal(sourceOf(SEND, "senderEmail"), "start.senderEmail");
-  assert.equal(sourceOf(SEND, "callToAction"), "start.callToAction");
-  // The Recipients and Emails rows come from the read step only.
+  // The Recipients, Emails and Call to action rows come from the read step only.
   assert.equal(sourceOf(SEND, "recipients"), `${READ}.recipients`);
   assert.equal(sourceOf(SEND, "emailBodies"), `${READ}.emailBodies`);
+  assert.equal(sourceOf(SEND, "callToAction"), `${READ}.callToAction`);
   // The read step reads the references the send start reads, from the same start inputs.
   for (const ref of ["approvedDraftBundleRef", "confirmedRecipientsRef"]) {
     assert.equal(sourceOf(SEND, ref), `start.${ref}`);
     assert.equal(sourceOf(READ, ref), `start.${ref}`);
   }
   assert.equal(sourceOf(READ, "emailBodies"), "start.emailBodies");
+  assert.equal(sourceOf(READ, "callToAction"), "start.callToAction");
   const call = refs[READ].data;
   assert.equal(call.tool, "extension_tool");
   assert.equal(call.input.name, READ_TOOL);
   assert.equal(call.input.input.recipientsRef, "{{ confirmedRecipientsRef }}");
   assert.equal(call.input.input.draftBundleRef, "{{ approvedDraftBundleRef }}");
   assert.match(call.input.input.emailBodies, /\{\{ emailBodies \| tojson \}\}$/);
+  assert.equal(call.input.input.callToAction, "{{ callToAction }}");
   assert.equal(refs[READ].metadata.cinatra.riskClass, "read_only");
   assert.equal(refs[READ].metadata.cinatra.publishes, false);
   // A caller cannot hand in a recipient list of its own: the flow takes none.
@@ -162,12 +165,12 @@ test("no input the card shows has a default, so a run without it does not start 
   for (const name of ROW_INPUTS) {
     assert.equal(Object.hasOwn(inputOf(refs[SEND], name), "default"), false, `the send step's ${name} has a default`);
   }
-  for (const name of ["recipients", "emailBodies"]) {
+  for (const name of ["recipients", "emailBodies", "callToAction"]) {
     const output = (refs[READ].outputs ?? []).find((entry) => entry.title === name);
     assert.ok(output, `the read step hands on no ${name}`);
     assert.equal(Object.hasOwn(output, "default"), false, `the read step's ${name} has a default`);
   }
-  assert.equal(Object.hasOwn(inputOf(refs[READ], "emailBodies"), "default"), false);
+  for (const name of ["emailBodies", "callToAction"]) assert.equal(Object.hasOwn(inputOf(refs[READ], name), "default"), false, `the read step's ${name} has a default`);
   // The run form requires the values a person types; the bodies come from the parent, hidden, and have no default.
   const { required, hidden } = refs.start.metadata.cinatra;
   assert.deepEqual([...required].sort(), ["callToAction", "senderEmail"]);
@@ -187,6 +190,7 @@ test("the card's values are typed for their rows", () => {
     assert.deepEqual(Object.keys(entry.json_schema.items.properties).sort(), ["company", "email", "name"]);
   }
   assert.equal(inputOf(refs[SEND], "callToAction").type, "string");
+  assert.equal((refs[READ].outputs ?? []).find((entry) => entry.title === "callToAction").type, "string");
 });
 
 test("the card's inputs reach the send step's template only through the input hint, never its rendered text", () => {
@@ -219,7 +223,7 @@ test("the prepare step takes the digest from the read-only preview tool and neve
   assert.doesNotMatch(system, /confirmation gate/, "the prepare text names a confirmation gate the flow no longer has");
 });
 
-test("the send texts name the five arguments and no other key, and name the publish card as the one place the person decides", () => {
+test("the send texts name the five arguments and no other key, and name the publish card as the one place the person decides (the wording only: it binds no argument)", () => {
   const { system, user } = refs[SEND].data;
   const block = system.match(/```json\n(\{\n {2}"campaignId"[\s\S]*?\n\})\n```/);
   assert.ok(block, "the send text carries no argument block for the send start");

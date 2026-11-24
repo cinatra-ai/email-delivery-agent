@@ -40,8 +40,8 @@ const BUNDLE = {
   type: "@cinatra-ai/campaigns:email-draft-bundle",
   data: {
     drafts: [
-      { recipientId: "c-1", recipientName: "Ada Lovelace", recipientEmail: "ada@example.com", subject: "One", body: "Hello Ada,\n\nOne idea." },
-      { contactId: "c-2", subject: "Two", body: "Hello Ben,\n\nAnother idea." },
+      { recipientId: "c-1", recipientName: "Ada Lovelace", recipientEmail: "ada@example.com", subject: "One", body: "Hello Ada,\n\nOne idea. Book a call." },
+      { contactId: "c-2", subject: "Two", body: "Hello Ben,\n\nAnother idea. Book a call." },
       { recipientId: "c-3", recipientName: "Cy Noaddress", recipientEmail: "", subject: "Three", body: "Hello Cy." },
     ],
   },
@@ -51,7 +51,9 @@ const BODIES = [
   { artifactId: "a-2", representationRevisionId: "r-2" },
   { artifactId: "a-3", representationRevisionId: "r-3" },
 ];
-const TEXTS = { "a-1": "Hello Ada,\n\nOne idea.\n", "a-2": "Hello Ben,\n\nAnother idea.", "a-3": "Hello Cy." };
+// The draft without an address (c-3) does not carry the call to action: the send does not mail it.
+const CALL_TO_ACTION = "Book a call.";
+const TEXTS = { "a-1": "Hello Ada,\n\nOne idea. Book a call.\n", "a-2": "Hello Ben,\n\nAnother idea. Book a call.", "a-3": "Hello Cy." };
 
 function ports({ objects = { [LIST_REF]: LIST, [BUNDLE_REF]: BUNDLE }, texts = TEXTS, type = BODY_TYPE, truncated = false } = {}) {
   const reads = [];
@@ -82,7 +84,7 @@ function ports({ objects = { [LIST_REF]: LIST, [BUNDLE_REF]: BUNDLE }, texts = T
 }
 
 const call = (input, p = ports()) => extensionTool({ input, ports: p });
-const fullInput = (emailBodies = JSON.stringify(BODIES)) => ({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies });
+const fullInput = (emailBodies = JSON.stringify(BODIES), callToAction = CALL_TO_ACTION) => ({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies, callToAction });
 
 /** A copy of the send start's reading: who it mails, with which body. */
 function sendMails(bundle, list) {
@@ -133,6 +135,7 @@ test("the card's recipients and bodies are exactly the drafts the send mails, fr
       { ...BODIES[0], contactId: "c-1" },
       { ...BODIES[1], contactId: "c-2" },
     ],
+    callToAction: CALL_TO_ACTION,
   });
   const mails = sendMails(BUNDLE, LIST);
   assert.deepEqual(answer.recipients.map((r) => r.email), mails.map((m) => m.to), "the card lists whom the send mails");
@@ -146,7 +149,7 @@ test("a list already parsed is taken as it is", async () => {
 });
 
 test("a run without email bodies, or with a body short, is refused before the card", async () => {
-  await refusal(call({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF }));
+  await refusal(call({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, callToAction: CALL_TO_ACTION }));
   for (const bodies of [null, "", "[]", "not json", JSON.stringify(BODIES.slice(0, 2)), JSON.stringify({ a: 1 })]) {
     await refusal(call(fullInput(bodies)));
   }
@@ -162,7 +165,7 @@ test("a run without either reference is refused before any read", async () => {
 });
 
 test("a body revision that is not the body of its draft is refused, so the card never shows an email the send would not mail", async () => {
-  const message = await refusal(call(fullInput(), ports({ texts: { ...TEXTS, "a-2": "Hello Ben,\n\nAn older idea." } })));
+  const message = await refusal(call(fullInput(), ports({ texts: { ...TEXTS, "a-2": "Hello Ben,\n\nAn older idea. Book a call." } })));
   assert.match(message, /Email body 2 /);
   // Bodies handed in out of draft order are refused too.
   await refusal(call(fullInput(JSON.stringify([BODIES[1], BODIES[0], BODIES[2]]))));
@@ -182,4 +185,42 @@ test("references that are not a draft bundle and a recipient list are refused", 
 test("a bundle whose drafts have no address is refused: the send would mail nothing", async () => {
   const bundle = { ...BUNDLE, data: { drafts: [BUNDLE.data.drafts[2]] } };
   await refusal(call(fullInput(JSON.stringify([BODIES[2]])), ports({ objects: { [LIST_REF]: LIST, [BUNDLE_REF]: bundle } })));
+});
+
+// ---- the call to action ----
+//
+// The card's "Call to action" row shows the call to action this step hands on,
+// and this step hands on only a call to action that every email the send mails
+// carries in its text. The text is compared as the bodies are compared with
+// their drafts: trailing white space is not part of it.
+
+test("the call to action is handed on only when every mailed body carries it", async () => {
+  const answer = await call(fullInput(undefined, `  ${CALL_TO_ACTION}  `));
+  assert.equal(answer.callToAction, CALL_TO_ACTION);
+  for (const body of answer.emailBodies) assert.ok(TEXTS[body.artifactId].includes(answer.callToAction), body.artifactId);
+});
+
+test("a call to action that a mailed body does not carry stops the run before the card", async () => {
+  const bundle = structuredClone(BUNDLE);
+  bundle.data.drafts[1].body = "Hello Ben,\n\nAnother idea. Reply to this email.";
+  const p = ports({ objects: { [LIST_REF]: LIST, [BUNDLE_REF]: bundle }, texts: { ...TEXTS, "a-2": "Hello Ben,\n\nAnother idea. Reply to this email." } });
+  const message = await refusal(call(fullInput(), p));
+  assert.match(message, /^CALL_TO_ACTION_NOT_IN_EMAIL: /);
+  assert.match(message, /email body 2 /i);
+  assert.ok(!message.includes(CALL_TO_ACTION), "the refusal repeats the call to action");
+  // A call to action that no mailed body carries is refused too.
+  await refusal(call(fullInput(undefined, "Visit our booth.")));
+});
+
+test("a run without a call to action is refused before the card", async () => {
+  const { callToAction: _left, ...without } = fullInput();
+  for (const input of [without, ...["", "   ", 42].map((callToAction) => ({ ...without, callToAction }))]) {
+    const message = await refusal(call(input));
+    assert.match(message, /^CALL_TO_ACTION_MISSING: /);
+  }
+});
+
+test("a body that is not mailed need not carry the call to action", async () => {
+  assert.ok(!TEXTS["a-3"].includes(CALL_TO_ACTION));
+  assert.equal((await call(fullInput())).callToAction, CALL_TO_ACTION);
 });

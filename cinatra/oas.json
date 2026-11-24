@@ -80,7 +80,7 @@
     {
       "title": "callToAction",
       "type": "string",
-      "description": "The call to action of the emails, as the publish card shows it. A run without it does not start."
+      "description": "The call to action of the emails. A run without it does not start. The read step hands it on to the publish card only when the text of every body the send mails carries it, and ends the run before the card otherwise."
     }
   ],
   "outputs": [
@@ -312,9 +312,9 @@
     },
     {
       "component_type": "DataFlowEdge",
-      "name": "start_callToAction_to_send",
+      "name": "resolve_send_callToAction_to_send",
       "source_node": {
-        "$component_ref": "start"
+        "$component_ref": "resolve_send"
       },
       "source_output": "callToAction",
       "destination_node": {
@@ -429,6 +429,18 @@
         "$component_ref": "resolve_send"
       },
       "destination_input": "emailBodies"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "start_callToAction_to_resolve_send",
+      "source_node": {
+        "$component_ref": "start"
+      },
+      "source_output": "callToAction",
+      "destination_node": {
+        "$component_ref": "resolve_send"
+      },
+      "destination_input": "callToAction"
     }
   ],
   "$referenced_components": {
@@ -519,7 +531,7 @@
         {
           "title": "callToAction",
           "type": "string",
-          "description": "The call to action of the emails, as the publish card shows it. A run without it does not start."
+          "description": "The call to action of the emails. A run without it does not start. The read step hands it on to the publish card only when the text of every body the send mails carries it, and ends the run before the card otherwise."
         }
       ]
     },
@@ -675,7 +687,8 @@
           "input": {
             "recipientsRef": "{{ confirmedRecipientsRef }}",
             "draftBundleRef": "{{ approvedDraftBundleRef }}",
-            "emailBodies": "{# pyagentspec-input-hint (do not remove): {{ emailBodies }} #}{{ emailBodies | tojson }}"
+            "emailBodies": "{# pyagentspec-input-hint (do not remove): {{ emailBodies }} #}{{ emailBodies | tojson }}",
+            "callToAction": "{{ callToAction }}"
           }
         },
         "agent_run_id": "{{ agent_run_id }}"
@@ -720,6 +733,10 @@
               ]
             }
           }
+        },
+        {
+          "title": "callToAction",
+          "type": "string"
         }
       ],
       "outputs": [
@@ -772,6 +789,11 @@
               ]
             }
           }
+        },
+        {
+          "title": "callToAction",
+          "type": "string",
+          "description": "The call to action the run names, trimmed, handed on only when the text of every body the send mails carries it. The publish card's Call to action row shows it."
         }
       ],
       "metadata": {
@@ -780,7 +802,7 @@
           "requiresApproval": false,
           "packageName": "@cinatra-ai/email-delivery-agent",
           "publishes": false,
-          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact). The send step takes the recipients and the bodies from this step only and passes the bodies to the send start as approvedBodies, so the publish card shows what the send mails. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body or a contact, one contact or one artifact named twice, more than 50 mailed drafts, or a bundle with nothing to mail ends the run before the card. This step writes nothing."
+          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact). The send step takes the recipients and the bodies from this step only and passes the bodies to the send start as approvedBodies, so the publish card shows what the send mails. It also hands on the call to action the card's Call to action row shows, and only one that the text of every mailed body carries, so the card never shows a call to action the send does not mail. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body or a contact, one contact or one artifact named twice, more than 50 mailed drafts, a bundle with nothing to mail, a run without a call to action (CALL_TO_ACTION_MISSING) or a mailed body without it (CALL_TO_ACTION_NOT_IN_EMAIL) ends the run before the card. This step writes nothing."
         }
       }
     },
@@ -885,7 +907,7 @@
         {
           "title": "callToAction",
           "type": "string",
-          "description": "The call to action of the emails, as the publish card shows it"
+          "description": "The call to action of the emails, as the read step handed it on after it found it in the text of every body the send mails; the publish card shows it"
         }
       ],
       "outputs": [
@@ -983,7 +1005,7 @@
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
           "a2uiSurfaceId": "email-delivery:step-1:output",
-          "description": "Single ApiNode → /api/llm-bridge and the publishing step of this flow: sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action). The Recipients and Emails rows take their values from the read step in front of this step, which resolves the same two references this step passes to the send start, so the card shows what the send mails. The step runs only after the person chose to send, and the application admits its one email_outreach_send_initial_start call only together with that decision, used once. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive) with the two references, the sender and approvedBodies, the list the card's Emails row shows, so the send mails the text of the approved body revisions the person saw. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false because the publish card is the one approval in front of the send.",
+          "description": "Single ApiNode → /api/llm-bridge and the publishing step of this flow: sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action). The Recipients, Emails and Call to action rows take their values from the read step in front of this step, which resolves the same two references this step passes to the send start, so the card shows what the send mails. The step runs only after the person chose to send, and the application admits its one email_outreach_send_initial_start call only together with that decision, used once. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive) with the two references, the sender and approvedBodies, the list the card's Emails row shows, so the send mails the text of the approved body revisions the person saw. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false because the publish card is the one approval in front of the send.",
           "tools": [
             "email_outreach_send_initial_start",
             "email_outreach_send_initial_status",

@@ -158,11 +158,41 @@ test("the flow draws no confirmation of its own (red: a step that waits for a pe
   assert.deepEqual(holders(oas, "requiresApproval").filter((c) => c.requiresApproval !== false), []);
 });
 
-test("the send step's confirmations list names only the host's publish decision for the send start (red: a gate renderer, a bound argument, another tool)", () => {
+test("the send step's confirmations list names the publish decision for the send start and nothing else (red: a gate renderer, any other key, another tool)", () => {
+  // The host does not read this list (it holds the step by its publishes flag
+  // and its decision row); the list says, for this suite, which decision the
+  // send start waits for. The former `arguments` key pointed into the answer of
+  // the flow's own confirmation step, which no longer exists; it never bound
+  // the arguments of a publishing step. The next test states what binds them.
   assert.deepEqual(steps[SEND].metadata.cinatra.confirmations, [{ tool: SEND_TOOL, decision: "publish" }]);
   assert.ok(steps[SEND].metadata.cinatra.tools.includes(SEND_TOOL), "the send step does not offer the tool its decision covers");
   const elsewhere = holders(oas, "confirmations").filter((c) => c !== steps[SEND].metadata.cinatra);
   assert.deepEqual(elsewhere, [], "another component declares confirmations");
+});
+
+// What binds the send start's arguments today, stated as it is. The host holds
+// a publishing step until its decision is released, and then serves the step's
+// calls (cinatra packages/agents/src/publish-decision-actions.ts,
+// publishCallAllowed): the decision covers the step, not the arguments of a
+// call. The send is a model-bridge step: the model writes the arguments of its
+// one send start call from the step's text, in which the flow renders the
+// sender, the two references and the approved bodies. The flow binds none of
+// them, and the host offers no form for a flow to bind them: the passthrough
+// road, where a step's arguments are the flow's data, does not admit the send
+// start, and an extension tool's ports reach no send. When the host adds such a
+// form, this test turns red and the send step takes it.
+test("the flow binds no argument of the send start call: the model writes them from the send step's text (the current state)", () => {
+  const send = steps[SEND];
+  assert.match(send.url, /\/api\/llm-bridge$/, "the send is not a model-bridge step");
+  assert.equal(Object.hasOwn(send.data, "tool"), false, "the send step's call data names a tool of its own");
+  assert.equal(Object.hasOwn(send.data, "input"), false, "the send step's call data carries tool arguments of its own");
+  for (const key of ["arguments", "boundArguments", "expectedArgs", "argsDigest", "toolArgs"]) {
+    assert.deepEqual(holders(oas, key), [], `a component declares ${key}, which the host does not read`);
+  }
+  // The values the model is told to pass are rendered into its text from the step's inputs.
+  for (const line of ["- campaignId: {{ campaignId }}", "- senderEmail: {{ senderEmail }}", "- approvedDraftBundleRef: {{ approvedDraftBundleRef }}", "- confirmedRecipientsRef: {{ confirmedRecipientsRef }}", "- approvedBodies: {{ emailBodies | tojson }}"]) {
+    assert.ok(send.data.user.includes(line), `the send's text does not render ${line}`);
+  }
 });
 
 test("the send step is reached only along start, prepare, filing, read (red: an edge into the send, the read or the filing from any other step)", () => {

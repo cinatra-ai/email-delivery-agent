@@ -22,6 +22,13 @@
 // one contact or one artifact occurs twice, when a body is of another type, cut
 // or not the body of its draft, or when the send would mail more than 50
 // drafts. So the card never shows an email that the send would not mail.
+// The step also hands on the call to action the card's "Call to action" row
+// shows, and only one that every mailed body carries in its text (compared as
+// a body is compared with its draft: trailing white space is not part of it).
+// A run without a call to action, or with one that a mailed body does not
+// carry, is refused before the card. The drafts hold no call-to-action field
+// of their own, so the text of the mailed body is what is compared. The
+// refusal names a code and never the call to action itself.
 // Nothing is written.
 
 const RECIPIENTS_LIST_TYPE = "@cinatra-ai/campaigns:recipients";
@@ -122,7 +129,8 @@ function nameOf(draft, row) {
 const companyOf = (row) => (row ? textOrEmpty(row.company) || textOrEmpty(row.companyName) : "");
 
 // Trailing white space is not part of what a reader sees in an email.
-const sameText = (a, b) => a.replace(/\s+$/, "") === b.replace(/\s+$/, "");
+const withoutTrailingSpace = (text) => text.replace(/\s+$/, "");
+const sameText = (a, b) => withoutTrailingSpace(a) === withoutTrailingSpace(b);
 
 export async function extensionTool({ input, ports }) {
   const recipientsRef = trimmedOrNone(input?.recipientsRef);
@@ -130,6 +138,13 @@ export async function extensionTool({ input, ports }) {
   if (recipientsRef === undefined || draftBundleRef === undefined) {
     throw new ExtensionToolCallRefusal(
       "The run names no approved draft bundle or no confirmed recipient list, so there is nothing to send.",
+    );
+  }
+
+  const callToAction = trimmedOrNone(input?.callToAction);
+  if (callToAction === undefined) {
+    throw new ExtensionToolCallRefusal(
+      "CALL_TO_ACTION_MISSING: The run names no call to action, so the publish card cannot show the call to action of the emails.",
     );
   }
 
@@ -232,7 +247,8 @@ export async function extensionTool({ input, ports }) {
   }
 
   // Every body handed in is the body of its draft, which is the body the send
-  // start mails.
+  // start mails. The text of each body is kept for the call-to-action check.
+  const textByArtifact = new Map();
   for (const entry of entries) {
     const body = entry.body;
     if (body === undefined) continue;
@@ -252,6 +268,7 @@ export async function extensionTool({ input, ports }) {
         `Email body ${position} of this run is not the body of approved draft ${entry.position}, which is the body the send mails.`,
       );
     }
+    textByArtifact.set(artifactId, read.text);
   }
 
   // The drafts the send mails: each one has an address, a contact and a body.
@@ -267,6 +284,11 @@ export async function extensionTool({ input, ports }) {
     if (entry.body === undefined) {
       throw new ExtensionToolCallRefusal(
         `Approved draft ${entry.position} of this run has an address but no approved body.`,
+      );
+    }
+    if (!withoutTrailingSpace(textByArtifact.get(entry.body.artifactId)).includes(callToAction)) {
+      throw new ExtensionToolCallRefusal(
+        `CALL_TO_ACTION_NOT_IN_EMAIL: Email body ${entry.body.position} of this run does not carry the call to action of the run, so the publish card would show a call to action that the send does not mail.`,
       );
     }
     const row = rowOf(entry.draft, rows, entry.address);
@@ -287,5 +309,5 @@ export async function extensionTool({ input, ports }) {
     );
   }
 
-  return { recipients, emailBodies };
+  return { recipients, emailBodies, callToAction };
 }

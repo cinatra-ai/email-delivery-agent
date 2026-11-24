@@ -47,12 +47,12 @@ const LIST = {
 };
 // The draft without an address sits between the two mailed drafts.
 const DRAFTS = [
-  { recipientId: "c-1", recipientName: "Ada Lovelace", recipientEmail: "ada@example.com", subject: "One", body: "Hello Ada." },
-  { recipientId: "c-3", recipientName: "Cy Noaddress", recipientEmail: "", subject: "Three", body: "Hello Cy." },
-  { contactId: "c-2", subject: "Two", body: "Hello Ben." },
+  { recipientId: "c-1", recipientName: "Ada Lovelace", recipientEmail: "ada@example.com", subject: "One", body: "Hello Ada. Book a call." },
+  { recipientId: "c-3", recipientName: "Cy Noaddress", recipientEmail: "", subject: "Three", body: "Hello Cy. Book a call." },
+  { contactId: "c-2", subject: "Two", body: "Hello Ben. Book a call." },
 ];
 const bundleOf = (drafts) => ({ objectId: BUNDLE_REF, type: "@cinatra-ai/campaigns:email-draft-bundle", data: { drafts } });
-const TEXTS = { "a-1": "Hello Ada.", "a-3": "Hello Cy.", "a-2": "Hello Ben." };
+const TEXTS = { "a-1": "Hello Ada. Book a call.", "a-3": "Hello Cy. Book a call.", "a-2": "Hello Ben. Book a call." };
 const POSITIONAL = [
   { artifactId: "a-1", representationRevisionId: "r-1" },
   { artifactId: "a-3", representationRevisionId: "r-3" },
@@ -79,7 +79,7 @@ function ports({ drafts = DRAFTS, texts = TEXTS } = {}) {
 }
 
 const call = (bodies, p = ports()) =>
-  extensionTool({ input: { recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies: JSON.stringify(bodies) }, ports: p });
+  extensionTool({ input: { recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies: JSON.stringify(bodies), callToAction: "Book a call." }, ports: p });
 
 async function refusal(promise, pattern) {
   const error = await promise.then(
@@ -119,7 +119,7 @@ test("a body whose contact names no draft is refused before the card", async () 
 
 test("two bodies for one contact are refused before the card", async () => {
   await refusal(
-    call([withContact(POSITIONAL[0], "c-1"), withContact(POSITIONAL[2], "c-2"), withContact({ artifactId: "a-4", representationRevisionId: "r-4" }, "c-2")], ports({ texts: { ...TEXTS, "a-4": "Hello Ben." } })),
+    call([withContact(POSITIONAL[0], "c-1"), withContact(POSITIONAL[2], "c-2"), withContact({ artifactId: "a-4", representationRevisionId: "r-4" }, "c-2")], ports({ texts: { ...TEXTS, "a-4": "Hello Ben. Book a call." } })),
     /both for contact c-2/,
   );
 });
@@ -141,7 +141,7 @@ test("two drafts for one contact are refused before the card", async () => {
 });
 
 test("a mailed draft that names no contact is refused before the card: the send cannot join a body to it", async () => {
-  const drafts = [DRAFTS[0], { recipientEmail: "ben@example.com", subject: "Two", body: "Hello Ben." }];
+  const drafts = [DRAFTS[0], { recipientEmail: "ben@example.com", subject: "Two", body: "Hello Ben. Book a call." }];
   await refusal(call([POSITIONAL[0], POSITIONAL[2]], ports({ drafts })), /names no contact/);
 });
 
@@ -154,8 +154,8 @@ test("more mailed drafts than one send takes are refused before the card", async
   const texts = {};
   const bodies = [];
   for (let i = 1; i <= 51; i += 1) {
-    drafts.push({ recipientId: `k-${i}`, recipientEmail: `p${i}@example.com`, subject: "S", body: `Body ${i}` });
-    texts[`b-${i}`] = `Body ${i}`;
+    drafts.push({ recipientId: `k-${i}`, recipientEmail: `p${i}@example.com`, subject: "S", body: `Body ${i}. Book a call.` });
+    texts[`b-${i}`] = `Body ${i}. Book a call.`;
     bodies.push({ artifactId: `b-${i}`, representationRevisionId: `v-${i}` });
   }
   await refusal(call(bodies, ports({ drafts, texts })), /50/);
