@@ -13,7 +13,7 @@
 // with equal scalar values. Extra keys and extra entries are allowed: this flow
 // keeps its own read-only prepare step, the summary the confirmation shows,
 // its closing sentence after the send and its end with its typed defaults.
-// This flow also files the recipient records in front of its send, a step of its own the copy does not carry yet.
+// This flow also files the recipient records and reads what the send mails in front of its send, two steps of its own the copy does not carry yet.
 //
 // The copy still carries the confirmation step this flow had (approval_gate),
 // its edges and its answer (the output userResponse). This flow no longer has
@@ -24,7 +24,7 @@
 // out of the comparison until the outreach pack re-embeds this flow; the
 // suite send-follows-the-publish-decision holds that this flow has none.
 //
-// Three paths are not compared, and each is held another way:
+// These paths are not compared, and each is held another way:
 // - send.data.system and send.data.user, the send step's prompt texts: this
 //   flow keeps its own, which name the send and status tools; the declared
 //   outputs they name are compared.
@@ -32,6 +32,10 @@
 //   false. The publish card is the one approval in front of the send and the
 //   send step's screen is not a hold (cinatra-ai/cinatra#3094); the arm "6d -
 //   the declared pauses are exactly the pauses the flow has" holds that.
+// - the default of senderEmail (on the flow, its start and its send step): the
+//   copy defaults the sending mailbox to empty, this flow has no default for
+//   it, because the publish card shows it and a run without it must not reach
+//   the card; the suite send-shows-the-publish-card-rows holds that.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -77,6 +81,9 @@ const SKIPPED = new Set([
   "send.data.system",
   "send.data.user",
   "send.metadata.cinatra.requiresApproval",
+  "inputs[senderEmail].default",
+  "start.inputs[senderEmail].default",
+  "send.inputs[senderEmail].default",
   // The confirmation's answer at the end node, gone with the confirmation (see the header).
   "end.outputs[userResponse]",
 ]);
@@ -114,6 +121,7 @@ function contains(have, want, path, missing) {
       return;
     }
     for (const [key, inner] of Object.entries(want)) {
+      if (SKIPPED.has(`${path}.${key}`)) continue;
       if (!Object.hasOwn(have, key)) missing.push(`${path}.${key}`);
       else contains(have[key], inner, `${path}.${key}`, missing);
     }
@@ -171,13 +179,13 @@ test("(7) every control edge of the copy is one of this flow, but the confirmati
   const have = controlEdgesOf(oas);
   // The copy's start goes to its confirmation step, which this flow no longer
   // has; this flow's start goes to its read-only prepare step and then to the
-  // filing step in front of the send. The copy's send goes straight to its end;
+  // filing step and the read step in front of the send. The copy's send goes straight to its end;
   // this flow's send goes on to its closing sentence and then to its end.
   const missing = [...controlEdgesOf(copy)]
     .filter((edge) => !touchesGoneStep(edge))
     .filter((edge) => edge !== "send -> end")
     .filter((edge) => !have.has(edge));
-  for (const edge of ["start -> prepare", "prepare -> file_recipients", "file_recipients -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
+  for (const edge of ["start -> prepare", "prepare -> file_recipients", "file_recipients -> resolve_send", "resolve_send -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
     if (!have.has(edge)) missing.push(edge);
   }
   assert.deepEqual(missing, [], "this flow lacks the copy's control edges: " + missing.join("; "));

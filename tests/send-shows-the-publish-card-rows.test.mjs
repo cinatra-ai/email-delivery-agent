@@ -17,9 +17,19 @@
 //
 // These arms hold that the declaration has the form the host's compiler reads
 // (the row grammar of packages/agents/src/oas-compiler.ts, collectPublishRows),
-// that every row's value reaches the send step from the start node, so a
-// parent can feed it, and that the send's texts and the prepare step's digest
-// still say what the flow does.
+// that the card shows what the send mails, and that the send's texts and the
+// prepare step's digest still say what the flow does.
+//
+// What the card shows and what the send mails come from one source. The send
+// start reads two references, the approved draft bundle and the confirmed
+// recipient list, and mails the bundle's drafts. The read step in front of the
+// send reads the same two references, from the same start inputs, and resolves
+// them into the recipients the send mails and the body revisions of the drafts
+// it mails (each one compared with its draft). The Recipients and Emails rows
+// take their values from that step only; the From row is the sender the send
+// start takes. No value the card shows has an empty default: a run without it
+// does not start, and a run whose bodies are not the drafts' bodies ends at the
+// read step, so no run reaches an empty or a different card.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,6 +44,8 @@ const refs = oas.$referenced_components ?? {};
 const SEND_TOOL = "email_outreach_send_initial_start";
 const PREVIEW_TOOL = "email_outreach_send_initial_preview";
 const SEND = "send";
+const READ = "resolve_send";
+const READ_TOOL = "send_contents";
 const PREPARE = "prepare";
 const ARGUMENTS = ["approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "contentDigest", "senderEmail"];
 const ROW_INPUTS = ["senderEmail", "recipients", "emailBodies", "callToAction"];
@@ -111,34 +123,68 @@ test("no row shows an internal identifier (red: a row over the campaign, a refer
   }
 });
 
-test("every row's value reaches the send step from the start node, and the flow takes it as an input (red: a row input with no source, or fed from another step)", () => {
-  const startInputs = titles(refs.start.inputs);
-  const flowInputs = titles(oas.inputs);
-  for (const name of ROW_INPUTS) {
-    assert.equal(sourceOf(SEND, name), `start.${name}`, `${name} does not come from the start node`);
-    assert.ok(startInputs.includes(name), `the start node takes no input ${name}`);
-    assert.ok(flowInputs.includes(name), `the flow takes no input ${name}`);
+test("the card's rows and the send's references trace to one source (red: a row fed from the start node past the read step, or the read step and the send reading different references)", () => {
+  // The From row is the sender the send start takes; the call to action is the flow's input.
+  assert.equal(sourceOf(SEND, "senderEmail"), "start.senderEmail");
+  assert.equal(sourceOf(SEND, "callToAction"), "start.callToAction");
+  // The Recipients and Emails rows come from the read step only.
+  assert.equal(sourceOf(SEND, "recipients"), `${READ}.recipients`);
+  assert.equal(sourceOf(SEND, "emailBodies"), `${READ}.emailBodies`);
+  // The read step reads the references the send start reads, from the same start inputs.
+  for (const ref of ["approvedDraftBundleRef", "confirmedRecipientsRef"]) {
+    assert.equal(sourceOf(SEND, ref), `start.${ref}`);
+    assert.equal(sourceOf(READ, ref), `start.${ref}`);
+  }
+  assert.equal(sourceOf(READ, "emailBodies"), "start.emailBodies");
+  const call = refs[READ].data;
+  assert.equal(call.tool, "extension_tool");
+  assert.equal(call.input.name, READ_TOOL);
+  assert.equal(call.input.input.recipientsRef, "{{ confirmedRecipientsRef }}");
+  assert.equal(call.input.input.draftBundleRef, "{{ approvedDraftBundleRef }}");
+  assert.match(call.input.input.emailBodies, /\{\{ emailBodies \| tojson \}\}$/);
+  assert.equal(refs[READ].metadata.cinatra.riskClass, "read_only");
+  assert.equal(refs[READ].metadata.cinatra.publishes, false);
+  // A caller cannot hand in a recipient list of its own: the flow takes none.
+  for (const owner of [oas, refs.start]) assert.equal(inputOf(owner, "recipients"), undefined);
+  for (const flowInput of ["senderEmail", "callToAction", "emailBodies"]) {
+    assert.ok(titles(oas.inputs).includes(flowInput) && titles(refs.start.inputs).includes(flowInput), `the flow takes no input ${flowInput}`);
   }
 });
 
-test("the card's inputs are typed for their rows and default to empty, so a run with no parent still mounts", () => {
-  for (const owner of [oas, refs.start, refs[SEND]]) {
-    const recipients = inputOf(owner, "recipients");
-    assert.equal(recipients.type, "array");
-    assert.deepEqual(recipients.default, []);
-    assert.deepEqual(Object.keys(recipients.json_schema.items.properties).sort(), ["company", "email", "name"]);
-    const bodies = inputOf(owner, "emailBodies");
+test("no input the card shows has a default, so a run without it does not start and never reaches the card (red: an empty default on a card value)", () => {
+  for (const owner of [oas, refs.start]) {
+    for (const name of ["senderEmail", "emailBodies", "callToAction"]) {
+      assert.equal(Object.hasOwn(inputOf(owner, name), "default"), false, `${name} has a default`);
+    }
+  }
+  for (const name of ROW_INPUTS) {
+    assert.equal(Object.hasOwn(inputOf(refs[SEND], name), "default"), false, `the send step's ${name} has a default`);
+  }
+  for (const name of ["recipients", "emailBodies"]) {
+    const output = (refs[READ].outputs ?? []).find((entry) => entry.title === name);
+    assert.ok(output, `the read step hands on no ${name}`);
+    assert.equal(Object.hasOwn(output, "default"), false, `the read step's ${name} has a default`);
+  }
+  assert.equal(Object.hasOwn(inputOf(refs[READ], "emailBodies"), "default"), false);
+  // The run form requires the values a person types; the bodies come from the parent, hidden, and have no default.
+  const { required, hidden } = refs.start.metadata.cinatra;
+  assert.deepEqual([...required].sort(), ["callToAction", "senderEmail"]);
+  assert.ok(hidden.includes("emailBodies"));
+});
+
+test("the card's values are typed for their rows", () => {
+  for (const owner of [refs[SEND], refs[READ]]) {
+    const bodies = inputOf(owner, "emailBodies") ?? (owner.outputs ?? []).find((entry) => entry.title === "emailBodies");
     assert.equal(bodies.type, "array");
-    assert.deepEqual(bodies.default, []);
     // The shape an artifacts row reads: a list of { artifactId, representationRevisionId }.
     assert.deepEqual(bodies.json_schema.items.required, ["artifactId", "representationRevisionId"]);
-    const cta = inputOf(owner, "callToAction");
-    assert.equal(cta.type, "string");
-    assert.equal(cta.default, "");
   }
-  const hidden = refs.start.metadata.cinatra.hidden;
-  assert.ok(hidden.includes("recipients") && hidden.includes("emailBodies"), "the structured card inputs are on the run form");
-  assert.ok(!refs.start.metadata.cinatra.required.some((name) => CARD_INPUTS.includes(name)), "a card input is required");
+  const recipients = [inputOf(refs[SEND], "recipients"), (refs[READ].outputs ?? []).find((entry) => entry.title === "recipients")];
+  for (const entry of recipients) {
+    assert.equal(entry.type, "array");
+    assert.deepEqual(Object.keys(entry.json_schema.items.properties).sort(), ["company", "email", "name"]);
+  }
+  assert.equal(inputOf(refs[SEND], "callToAction").type, "string");
 });
 
 test("the card's inputs reach the send step's template only through the input hint, never its rendered text", () => {

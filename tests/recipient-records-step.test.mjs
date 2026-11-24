@@ -21,7 +21,7 @@ const controlEdges = () =>
 const into = (id) => controlEdges().filter(([, to]) => to === id).map(([from]) => from);
 
 test("S1 the manifest declares the recipient_records tool and its module loads", async () => {
-  assert.deepEqual(pkg.cinatra.tools, [{ name: "recipient_records", module: MODULE_PATH, embeddable: true }]);
+  assert.deepEqual(pkg.cinatra.tools.filter((t) => t.name === "recipient_records"), [{ name: "recipient_records", module: MODULE_PATH, embeddable: true }]);
   const { name, module } = pkg.cinatra.tools[0];
   assert.match(name, /^[a-z][a-z0-9_]*$/);
   assert.ok(module.startsWith("./"));
@@ -76,23 +76,26 @@ test("S2 the file_recipients component has the declared shape", () => {
   });
 });
 
-test("S3 the step is listed directly after the prepare step and directly before the send", () => {
+test("S3 the step is listed directly after the prepare step and directly before the read step in front of the send", () => {
   const ids = oas.nodes.map((n) => n.$component_ref);
   assert.equal(ids[ids.indexOf("prepare") + 1], "file_recipients");
-  assert.equal(ids[ids.indexOf("file_recipients") + 1], "send");
+  assert.equal(ids[ids.indexOf("file_recipients") + 1], "resolve_send");
+  assert.equal(ids[ids.indexOf("resolve_send") + 1], "send");
 });
 
-test("S4 the edge list puts the filing step directly before the send", () => {
+test("S4 the edge list puts the filing step directly before the read step in front of the send", () => {
   const edges = controlEdges().map(([a, b]) => `${a} -> ${b}`);
   assert.deepEqual(edges, [
     "start -> prepare",
     "prepare -> file_recipients",
-    "file_recipients -> send",
+    "file_recipients -> resolve_send",
+    "resolve_send -> send",
     "send -> delivery_summary",
     "delivery_summary -> end",
   ]);
   assert.deepEqual(into("file_recipients"), ["prepare"]);
-  assert.deepEqual(into("send"), ["file_recipients"]);
+  assert.deepEqual(into("resolve_send"), ["file_recipients"]);
+  assert.deepEqual(into("send"), ["resolve_send"]);
 });
 
 test("S4b the filing step declares that it makes no external write, and the send is the flow's one publishing step", () => {

@@ -47,6 +47,11 @@
         "name": "recipient_records",
         "module": "./cinatra/tools/recipient-records.mjs",
         "embeddable": true
+      },
+      {
+        "name": "send_contents",
+        "module": "./cinatra/tools/send-contents.mjs",
+        "embeddable": true
       }
     ]
   },

@@ -17,7 +17,7 @@
 //      no root screen is listed, the send step asks for no approval of its
 //      own, and its confirmations list names only the host's publish decision.
 //   2. The send step is reached only along the one path start, prepare,
-//      filing, send; nothing branches; after the send the run ends through
+//      filing, read, send; nothing branches; after the send the run ends through
 //      the closing statement.
 //   3. The send step's tool offer is the flow's declaration. The host reads a
 //      model-bridge step's declaration from `metadata.cinatra.tools`. The
@@ -70,6 +70,7 @@ const edges = (oas.control_flow_connections ?? []).map((e) => ({
 
 const PREPARE = "prepare";
 const FILING = "file_recipients";
+const READ = "resolve_send";
 const SEND = "send";
 const SUMMARY = "delivery_summary";
 const SEND_TOOL = "email_outreach_send_initial_start";
@@ -109,9 +110,11 @@ test("the flow is one flat graph whose steps are the ones this suite names", () 
     [],
     "the flow nests a flow, which this suite does not read",
   );
-  assert.deepEqual([...nodeIds].sort(), ["delivery_summary", "end", FILING, PREPARE, SEND, "start"].sort());
+  assert.deepEqual([...nodeIds].sort(), ["delivery_summary", "end", FILING, PREPARE, READ, SEND, "start"].sort());
   assert.equal(steps[PREPARE].component_type, "ApiNode");
   assert.equal(steps[FILING].component_type, "ApiNode");
+  assert.equal(steps[READ].component_type, "ApiNode");
+  assert.match(steps[READ].url, /\/api\/agents\/passthrough$/);
   assert.equal(steps[SEND].component_type, "ApiNode");
   assert.equal(steps[SUMMARY].component_type, "OutputMessageNode");
   assert.match(steps[SEND].url, /\/api\/llm-bridge$/);
@@ -136,6 +139,8 @@ test("the send step is the flow's one publishing step, a top-level node (red: pu
   assert.equal(Object.hasOwn(oas.metadata?.cinatra ?? {}, "publishes"), false, "the flow root declares publishes");
   // Every other step that can reach a connector declares that it makes no external write, or is read-only.
   assert.equal(steps[FILING].metadata.cinatra.publishes, false);
+  assert.equal(steps[READ].metadata.cinatra.publishes, false);
+  assert.equal(steps[READ].metadata.cinatra.riskClass, "read_only");
   assert.equal(steps[PREPARE].metadata.cinatra.riskClass, "read_only");
 });
 
@@ -160,12 +165,14 @@ test("the send step's confirmations list names only the host's publish decision 
   assert.deepEqual(elsewhere, [], "another component declares confirmations");
 });
 
-test("the send step is reached only along start, prepare, filing (red: an edge into the send or the filing from any other step)", () => {
-  assert.deepEqual(into(SEND).map((e) => e.from), [FILING], "the send has another way in");
+test("the send step is reached only along start, prepare, filing, read (red: an edge into the send, the read or the filing from any other step)", () => {
+  assert.deepEqual(into(SEND).map((e) => e.from), [READ], "the send has another way in");
+  assert.deepEqual(into(READ).map((e) => e.from), [FILING], "the read before the send has another way in");
   assert.deepEqual(into(FILING).map((e) => e.from), [PREPARE], "the filing before the send has another way in");
   assert.deepEqual(into(PREPARE).map((e) => e.from), ["start"], "the prepare step has another way in");
   assert.ok(reach().has(SEND), "the send is not reachable at all");
   assert.equal(reach(FILING).has(SEND), false, "the send is reachable around the filing step");
+  assert.equal(reach(READ).has(SEND), false, "the send is reachable around the read step");
 });
 
 test("nothing branches and every step has one way out (red: a second edge out of a step, a named branch, or a branching step)", () => {
@@ -226,6 +233,7 @@ const SEND_STEP_WORDS = ["agent_run", "agent_run_id", "max_steps"];
 const OTHER_STEP_NAMES = {
   [PREPARE]: ["email_outreach_send_initial_preview", "objects_get"],
   [FILING]: ["extension_tool", "recipient_records"],
+  [READ]: ["extension_tool", "send_contents"],
 };
 
 test("the send step's text names the tools and words this suite lists and no other (red: any new snake_case name or name( call in the send step's call data)", () => {
