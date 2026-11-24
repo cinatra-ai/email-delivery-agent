@@ -88,6 +88,30 @@ test("the send step declares the four rows, From, Recipients, Emails and Call to
   assert.deepEqual(refs[SEND].metadata.cinatra.publishRows, EXPECTED_ROWS);
 });
 
+// The card shows what the send mails because one value feeds both: each row's
+// input is an input of the send step, fed by one data edge from the start node
+// or the read step, and the send step is the model-free passthrough call whose
+// arguments render those same inputs. No model sits between the card and the
+// send start.
+const ROW_SOURCES = {
+  senderEmail: "start.senderEmail",
+  recipients: `${READ}.recipients`,
+  emailBodies: `${READ}.emailBodies`,
+  callToAction: `${READ}.callToAction`,
+};
+test("every row is a value the model-free send step takes from the start node or the read step, and the rows the send mails with are its arguments (red: a model send step, a row fed from another step, or an argument that is not the row's value)", () => {
+  const send = refs[SEND];
+  assert.equal(send.url, "{{CINATRA_BASE_URL}}/api/agents/passthrough", "the card sits on a step that is not the passthrough call");
+  assert.equal(send.data.tool, SEND_TOOL);
+  for (const key of ["system", "user", "agent_id"]) assert.equal(Object.hasOwn(send.data, key), false, `the send step carries the model key ${key}`);
+  const shown = send.metadata.cinatra.publishRows.map((row) => row.input);
+  assert.deepEqual(shown, Object.keys(ROW_SOURCES));
+  for (const input of shown) assert.equal(sourceOf(SEND, input), ROW_SOURCES[input], `the ${input} row`);
+  const rendered = (value) => value.replace(/^\{#[\s\S]*?#\}/, "");
+  assert.equal(rendered(send.data.input.senderEmail), "{{ senderEmail }}", "the send does not mail from the mailbox the From row shows");
+  assert.equal(rendered(send.data.input.approvedBodies), "{{ emailBodies | tojson }}", "the send does not mail the bodies the Emails row shows");
+});
+
 test("every row is in the form the host's compiler reads", () => {
   const rows = refs[SEND].metadata.cinatra.publishRows;
   assert.ok(rows.length >= 1 && rows.length <= 4, "one to four rows");
@@ -193,14 +217,14 @@ test("the card's values are typed for their rows", () => {
   assert.equal((refs[READ].outputs ?? []).find((entry) => entry.title === "callToAction").type, "string");
 });
 
-test("the card's inputs reach the send step's template only through the input hint, never its rendered text", () => {
-  const { system, user } = refs[SEND].data;
-  const hint = user.match(/^\{#[^#]*#\}/);
-  assert.ok(hint, "the send's input text opens with no input hint");
+test("the card's own inputs reach the send step's call only through the input hint, never a rendered argument", () => {
+  const values = Object.values(refs[SEND].data.input);
+  const withHint = values.filter((value) => /^\{#[^#]*#\}/.test(value));
+  assert.equal(withHint.length, 1, "the send's call carries no input hint, or more than one");
+  const hint = withHint[0].match(/^\{#[^#]*#\}/)[0];
   for (const name of CARD_INPUTS) {
-    assert.ok(hint[0].includes(`{{ ${name} }}`), `the hint does not name ${name}`);
-    assert.ok(!user.slice(hint[0].length).includes(name), `the send's rendered input text carries ${name}`);
-    assert.ok(!system.includes(`{{ ${name} }}`), `the send's system text renders ${name}`);
+    assert.ok(hint.includes(`{{ ${name} }}`), `the hint does not name ${name}`);
+    for (const value of values) assert.ok(!value.replace(/^\{#[^#]*#\}/, "").includes(name), `a rendered argument carries ${name}`);
   }
 });
 
@@ -223,22 +247,16 @@ test("the prepare step takes the digest from the read-only preview tool and neve
   assert.doesNotMatch(system, /confirmation gate/, "the prepare text names a confirmation gate the flow no longer has");
 });
 
-test("the send texts name the five arguments and no other key, and name the publish card as the one place the person decides (the wording only: it binds no argument)", () => {
-  const { system, user } = refs[SEND].data;
-  const block = system.match(/```json\n(\{\n {2}"campaignId"[\s\S]*?\n\})\n```/);
-  assert.ok(block, "the send text carries no argument block for the send start");
-  assert.deepEqual(Object.keys(JSON.parse(block[1])).sort(), ARGUMENTS);
-  assert.ok(system.includes("with these five arguments and no other key"));
-  // The send start's own schema refuses an empty or null reference, so a key whose input is empty is left out.
-  assert.ok(system.includes("Leave out a key whose input is empty"), "the send text does not say how an empty value is passed");
-  assert.ok(!system.includes("pass JSON null"), "the send text still passes null for an empty value");
+test("the send step's call passes the five arguments and no other key, and the texts name the publish card as the one place the person decides", () => {
+  assert.deepEqual(Object.keys(refs[SEND].data.input).sort(), ARGUMENTS);
   for (const name of ARGUMENTS) {
     const source = ARGUMENT_SOURCE[name] ?? name;
-    assert.ok(user.includes(`- ${name}: {{ ${source} }}`), `the send's input text carries no line for ${name}`);
+    assert.ok(refs[SEND].data.input[name].endsWith(`{{ ${source} }}`), `the send's call renders ${name} from another value`);
   }
-  assert.ok(!system.includes(PREVIEW_TOOL), "the send text names the preview tool, which the step does not offer");
-  assert.ok(system.includes("publish card"), "the send text does not name the publish card");
-  for (const text of [system, user, refs[SEND].metadata.cinatra.description, oas.description]) {
+  assert.ok(!JSON.stringify(refs[SEND].data).includes(PREVIEW_TOOL), "the send's call names the preview tool");
+  const description = refs[SEND].metadata.cinatra.description;
+  assert.ok(description.includes("publish card"), "the send step's description does not name the publish card");
+  for (const text of [description, oas.description]) {
     assert.doesNotMatch(text, /confirmation gate|send-confirmation|at the gate/i, "a text names the confirmation gate the flow no longer has");
   }
 });

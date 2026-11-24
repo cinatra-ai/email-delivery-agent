@@ -24,10 +24,20 @@
 // out of the comparison until the outreach pack re-embeds this flow; the
 // suite send-follows-the-publish-decision holds that this flow has none.
 //
+// The copy's send is a model step that writes the send start's arguments and
+// returns a result object, sendResult. This flow's send is a model-free call of
+// the send start on the passthrough road (cinatra-ai/cinatra#3089): its
+// arguments are the flow's values, and it hands on the members of the send
+// start's answer (its status, the number sent and the reason of a failure), not
+// a result object. The copy's model-step paths, its sendResult output (on the
+// send, on its end and on the flow) and the data edge that carries it are left
+// out of the comparison until the outreach pack re-embeds this flow; the suite
+// send-follows-the-publish-decision holds the send's call and its outputs.
+//
 // These paths are not compared, and each is held another way:
-// - send.data.system and send.data.user, the send step's prompt texts: this
-//   flow keeps its own, which name the send and status tools; the declared
-//   outputs they name are compared.
+// - send.url, send.data.system, send.data.user and send.data.agent_id, the
+//   copy's model step: this flow's send calls the passthrough road and carries
+//   no model text.
 // - send.metadata.cinatra.requiresApproval: the copy says true, this flow keeps
 //   false. The publish card is the one approval in front of the send and the
 //   send step's screen is not a hold (cinatra-ai/cinatra#3094); the arm "6d -
@@ -63,6 +73,9 @@ function strip(value) {
 /** The copy's confirmation step and its answer, which this flow no longer has (see the header). */
 const GONE_STEP = "approval_gate";
 const GONE_OUTPUT = "userResponse";
+/** The copy's send result object and the edge that carries it, which this flow no longer has (see the header). */
+const GONE_RESULT = "sendResult";
+const GONE_RESULT_EDGE = "send.sendResult -> end.sendResult";
 const touchesGoneStep = (edge) => edge.split(" -> ").some((end) => end.split(".")[0].split("[")[0] === GONE_STEP);
 
 const copy = strip(rawCopy);
@@ -76,10 +89,15 @@ function copyList(key) {
   return list;
 }
 
-/** The three paths held another way, and the end node's answer that this flow no longer has, as the header says. */
+/** The paths held another way, and the end node's answers that this flow no longer has, as the header says. */
 const SKIPPED = new Set([
+  "send.url",
   "send.data.system",
   "send.data.user",
+  "send.data.agent_id",
+  // The copy's result object, which this flow's send no longer returns (see the header).
+  "send.outputs[sendResult]",
+  "end.outputs[sendResult]",
   "send.metadata.cinatra.requiresApproval",
   "inputs[senderEmail].default",
   "start.inputs[senderEmail].default",
@@ -163,14 +181,17 @@ test("(7) every step of the embedded copy is a step of this flow, carrying all i
 test("(7) the flow takes every input and hands on every output the copy does", () => {
   const missing = [];
   contains(oas.inputs ?? [], copyList("inputs"), "inputs", missing);
-  contains(oas.outputs ?? [], copyList("outputs").filter((o) => o.title !== GONE_OUTPUT), "outputs", missing);
+  contains(oas.outputs ?? [], copyList("outputs").filter((o) => o.title !== GONE_OUTPUT && o.title !== GONE_RESULT), "outputs", missing);
   assert.deepEqual(missing, [], "this flow lacks the copy's inputs or outputs: " + missing.join("; "));
 });
 
 test("(7) every data edge of the copy is a data edge of this flow", () => {
   copyList("data_flow_connections");
   const have = dataEdgesOf(oas);
-  const missing = [...dataEdgesOf(copy)].filter((edge) => !touchesGoneStep(edge)).filter((edge) => !have.has(edge));
+  const missing = [...dataEdgesOf(copy)]
+    .filter((edge) => !touchesGoneStep(edge))
+    .filter((edge) => edge !== GONE_RESULT_EDGE)
+    .filter((edge) => !have.has(edge));
   assert.deepEqual(missing, [], "this flow lacks the copy's data edges: " + missing.join("; "));
 });
 

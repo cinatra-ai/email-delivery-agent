@@ -4,11 +4,12 @@
 // loader derivation (the host's docker/wayflow/agent_loader.py) reads an
 // ApiNode output that targets /api/llm-bridge and emits a closed EMPTY object
 // for a declared object that names no members, reporting that output as
-// undeclared. Both bridge outputs below therefore declare their members in
-// this package's own OAS, in the fleet spelling: a json_schema block with a
-// properties map and a required list naming every member.
+// undeclared. The flow's one bridge output, the prepare step's summary,
+// therefore declares its members in this package's own OAS, in the fleet
+// spelling: a json_schema block with a properties map and a required list
+// naming every member.
 //
-// The member names are the ones this package's own system prompts spell out
+// The member names are the ones the prepare step's system prompt spells out
 // and the send-confirmation renderer of @cinatra-ai/email-artifacts reads.
 
 import test from "node:test";
@@ -69,36 +70,15 @@ test("prepare/summary declares its item members", () => {
   assert.deepEqual(declaredRequired(output).sort(), Object.keys(members).sort());
 });
 
-test("send/sendResult declares its item members", () => {
-  const output = bridgeOutput("send", "sendResult");
-  const members = declaredMembers(output);
-  assert.ok(members, "send/sendResult declares no members (reads free-form)");
-  assert.deepEqual(Object.keys(members).sort(), [
-    "errorCode",
-    "errorMessage",
-    "operationId",
-    "status",
-    "summary",
-    "totalFailed",
-    "totalSent",
-  ]);
-  assert.equal(members.status.type, "string");
-  assert.deepEqual(members.status.enum, ["completed", "failed"]);
-  assert.equal(members.totalSent.type, "integer");
-  assert.equal(members.totalFailed.type, "integer");
-  assert.equal(members.operationId.type, "string");
-  assert.equal(members.errorCode.type, "string");
-  assert.equal(members.errorMessage.type, "string");
-  assert.equal(members.summary.type, "string");
-  assert.deepEqual(declaredRequired(output).sort(), Object.keys(members).sort());
-});
-
-test("neither bridge output is left to a free-form disclosure sentence", () => {
-  for (const [nodeId, title] of [["prepare", "summary"], ["send", "sendResult"]]) {
+test("the bridge output is not left to a free-form disclosure sentence, and the send is no bridge step", () => {
+  for (const [nodeId, title] of [["prepare", "summary"]]) {
     const output = bridgeOutput(nodeId, title);
     assert.ok(
       declaredMembers(output),
       `${nodeId}/${title} still names no members`,
     );
   }
+  // The send step is a passthrough call of the send start; its outputs are the members of that answer, not a model's
+  // structured output (tests/send-follows-the-publish-decision.test.mjs holds them).
+  assert.ok(!String(components.send?.url).endsWith(BRIDGE_PATH), "the send step targets the LLM bridge");
 });

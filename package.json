@@ -27,10 +27,6 @@
       {
         "primitive": "email_outreach_send_initial_start",
         "requirement": "required"
-      },
-      {
-        "primitive": "email_outreach_send_initial_status",
-        "requirement": "required"
       }
     ],
     "packageType": "agent",

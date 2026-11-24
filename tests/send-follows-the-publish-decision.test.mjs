@@ -19,16 +19,15 @@
 //   2. The send step is reached only along the one path start, prepare,
 //      filing, read, send; nothing branches; after the send the run ends through
 //      the closing statement.
-//   3. The send step's tool offer is the flow's declaration. The host reads a
-//      model-bridge step's declaration from `metadata.cinatra.tools`. The
-//      send step declares the tools its recipe calls and no other, so the
-//      host offers it exactly those; the prepare step declares none. The
-//      suite pins that reading, and it reads the tool names every step's call
-//      data carries against explicit lists: a name that is not on a list
-//      fails, so a tool added to any step turns the suite red until the list
-//      names it. The send primitives on the send step's list are exactly the
-//      primitives the manifest consumes, and the declared list is exactly the
-//      tools the send step's text calls.
+//   3. The send step is a model-free passthrough call of the send start. Its
+//      arguments are templates over its own inputs, each fed by a data edge
+//      from the start node or the read step, so the send mails with the values
+//      the publish card showed; approvedBodies is always the read step's list.
+//      The suite reads the tool names every step's call data carries against
+//      explicit lists: a name that is not on a list fails, so a tool added to
+//      any step turns the suite red until the list names it. Only the send
+//      step names the send start, the manifest consumes exactly that
+//      primitive, and no step declares a model tool list.
 //
 // Each test names the change that turns it red.
 //
@@ -117,7 +116,7 @@ test("the flow is one flat graph whose steps are the ones this suite names", () 
   assert.match(steps[READ].url, /\/api\/agents\/passthrough$/);
   assert.equal(steps[SEND].component_type, "ApiNode");
   assert.equal(steps[SUMMARY].component_type, "OutputMessageNode");
-  assert.match(steps[SEND].url, /\/api\/llm-bridge$/);
+  assert.match(steps[SEND].url, /\/api\/agents\/passthrough$/);
   assert.match(steps[PREPARE].url, /\/api\/llm-bridge$/);
 });
 
@@ -165,34 +164,74 @@ test("the send step's confirmations list names the publish decision for the send
   // the flow's own confirmation step, which no longer exists; it never bound
   // the arguments of a publishing step. The next test states what binds them.
   assert.deepEqual(steps[SEND].metadata.cinatra.confirmations, [{ tool: SEND_TOOL, decision: "publish" }]);
-  assert.ok(steps[SEND].metadata.cinatra.tools.includes(SEND_TOOL), "the send step does not offer the tool its decision covers");
+  assert.equal(steps[SEND].data.tool, SEND_TOOL, "the send step does not call the tool its decision covers");
   const elsewhere = holders(oas, "confirmations").filter((c) => c !== steps[SEND].metadata.cinatra);
   assert.deepEqual(elsewhere, [], "another component declares confirmations");
 });
 
-// What binds the send start's arguments today, stated as it is. The host holds
-// a publishing step until its decision is released, and then serves the step's
-// calls (cinatra packages/agents/src/publish-decision-actions.ts,
-// publishCallAllowed): the decision covers the step, not the arguments of a
-// call. The send is a model-bridge step: the model writes the arguments of its
-// one send start call from the step's text, in which the flow renders the
-// sender, the two references and the approved bodies. The flow binds none of
-// them, and the host offers no form for a flow to bind them: the passthrough
-// road, where a step's arguments are the flow's data, does not admit the send
-// start, and an extension tool's ports reach no send. When the host adds such a
-// form, this test turns red and the send step takes it.
-test("the flow binds no argument of the send start call: the model writes them from the send step's text (the current state)", () => {
+// What binds the send start's arguments. The host holds a publishing step
+// until its decision is released, and the passthrough road serves the send
+// start only to a listed publishing step whose decision is released (cinatra
+// src/app/api/agents/passthrough/route.ts with publishingStepCallReleased,
+// cinatra#3089). The send step is that road's call: its `data` is the request
+// body, `tool` names the send start, and each argument in `input` is a template
+// over one of the step's own inputs, which a data edge feeds from the start
+// node or the read step. No model writes an argument: the arguments the send
+// start mails with are the values the publish card showed.
+const SEND_ARGUMENTS = {
+  approvedBodies: { input: "emailBodies", template: "{{ emailBodies | tojson }}", from: "resolve_send.emailBodies" },
+  approvedDraftBundleRef: { input: "approvedDraftBundleRef", template: "{{ approvedDraftBundleRef }}", from: "start.approvedDraftBundleRef" },
+  campaignId: { input: "campaignId", template: "{{ campaignId }}", from: "start.campaignId" },
+  confirmedRecipientsRef: { input: "confirmedRecipientsRef", template: "{{ confirmedRecipientsRef }}", from: "start.confirmedRecipientsRef" },
+  senderEmail: { input: "senderEmail", template: "{{ senderEmail }}", from: "start.senderEmail" },
+};
+const LEADING_COMMENT = /^\{#[\s\S]*?#\}/;
+const dataEdgesInto = (step, input) =>
+  (oas.data_flow_connections ?? []).filter((e) => refOf(e.destination_node) === step && e.destination_input === input);
+
+test("the send start's arguments are the flow's own values: the send step is a model-free passthrough call, and each argument is one input fed from the start node or the read step (red: a model step, another tool, an argument added, removed, renamed or written another way)", () => {
   const send = steps[SEND];
-  assert.match(send.url, /\/api\/llm-bridge$/, "the send is not a model-bridge step");
-  assert.equal(Object.hasOwn(send.data, "tool"), false, "the send step's call data names a tool of its own");
-  assert.equal(Object.hasOwn(send.data, "input"), false, "the send step's call data carries tool arguments of its own");
+  assert.equal(send.component_type, "ApiNode");
+  assert.equal(send.url, "{{CINATRA_BASE_URL}}/api/agents/passthrough", "the send is not a passthrough call");
+  assert.equal(send.http_method, "POST");
+  assert.deepEqual(Object.keys(send.data).sort(), ["agent_run_id", "input", "tool"], "the send's call data carries a key the passthrough road does not read, or a model text");
+  assert.equal(send.data.tool, SEND_TOOL);
+  assert.equal(send.data.agent_run_id, "{{ agent_run_id }}");
+  assert.equal(dataEdgesInto(SEND, "agent_run_id").map((e) => `${refOf(e.source_node)}.${e.source_output}`).join(), "start.agent_run_id");
+  assert.deepEqual(Object.keys(send.data.input).sort(), Object.keys(SEND_ARGUMENTS).sort());
+  for (const [argument, { input, template, from }] of Object.entries(SEND_ARGUMENTS)) {
+    const value = send.data.input[argument];
+    assert.equal(typeof value, "string", `${argument} is not one template`);
+    assert.equal(value.replace(LEADING_COMMENT, ""), template, `${argument} is not rendered from the input ${input} alone`);
+    assert.ok((send.inputs ?? []).some((entry) => entry.title === input), `the send step declares no input ${input}`);
+    const feeds = dataEdgesInto(SEND, input).map((e) => `${refOf(e.source_node)}.${e.source_output}`);
+    assert.deepEqual(feeds, [from], `the send step's ${input} is not fed by ${from} alone`);
+  }
   for (const key of ["arguments", "boundArguments", "expectedArgs", "argsDigest", "toolArgs"]) {
     assert.deepEqual(holders(oas, key), [], `a component declares ${key}, which the host does not read`);
   }
-  // The values the model is told to pass are rendered into its text from the step's inputs.
-  for (const line of ["- campaignId: {{ campaignId }}", "- senderEmail: {{ senderEmail }}", "- approvedDraftBundleRef: {{ approvedDraftBundleRef }}", "- confirmedRecipientsRef: {{ confirmedRecipientsRef }}", "- approvedBodies: {{ emailBodies | tojson }}"]) {
-    assert.ok(send.data.user.includes(line), `the send's text does not render ${line}`);
-  }
+});
+
+test("the send start always takes the approved bodies in the strict form: the list the read step resolved, never the references alone (red: approvedBodies left out, made conditional or given a default)", () => {
+  const value = steps[SEND].data.input.approvedBodies;
+  assert.ok(typeof value === "string" && value.endsWith("{{ emailBodies | tojson }}"));
+  assert.doesNotMatch(value.replace(LEADING_COMMENT, ""), /\{%/, "approvedBodies is passed only under a condition");
+  const input = (steps[SEND].inputs ?? []).find((entry) => entry.title === "emailBodies");
+  assert.equal(Object.hasOwn(input, "default"), false, "the send step's bodies have a default, so the step can start without the read step's list");
+  assert.equal(input.type, "array");
+  assert.equal(input.json_schema.maxItems, 50);
+});
+
+test("the send step's outputs are the members of the send start's answer, each with a default (red: an output the answer does not carry, or one without a default)", () => {
+  // The send start answers { operationId, kind, status, startedAt, completedAt, sentCount, errorMessage }; the road
+  // hands each declared output from the member of the same name, and errorMessage is absent from a completed send.
+  const declared = (steps[SEND].outputs ?? []).map(({ title, type, default: fallback }) => ({ title, type, default: fallback }));
+  assert.deepEqual(declared, [
+    { title: "status", type: "string", default: "" },
+    { title: "sentCount", type: "integer", default: 0 },
+    { title: "operationId", type: "string", default: "" },
+    { title: "errorMessage", type: "string", default: "" },
+  ]);
 });
 
 test("the send step is reached only along start, prepare, filing, read (red: an edge into the send, the read or the filing from any other step)", () => {
@@ -245,13 +284,10 @@ function namesIn(step) {
   return [...names].sort();
 }
 
-// The tools the send step's text may call: the read tool and the send
-// primitives. The send primitives are exactly the manifest's consumed
-// primitives (the next test reads them). A tool-shaped name outside this list
-// and the words list fails the suite until it is listed here.
-const SEND_STEP_TOOLS = ["email_outreach_send_initial_start", "email_outreach_send_initial_status", "objects_get"];
-// Snake_case words of the send step's text that are not tools.
-const SEND_STEP_WORDS = ["agent_run", "agent_run_id", "max_steps"];
+// The send step calls the send start and names no other tool. The passthrough
+// road serves the send start only to a listed publishing step whose decision is
+// released, and the send step is the flow's one publishing step.
+const SEND_STEP_TOOLS = [SEND_TOOL];
 
 // What every other step of the flow names today. A tool-shaped name added to
 // one of them, or a step added or removed, fails the suite until this list is
@@ -259,29 +295,33 @@ const SEND_STEP_WORDS = ["agent_run", "agent_run_id", "max_steps"];
 // named by any step but the send step is therefore a name that is not on this
 // list. The prepare step's second name is the read-only preview of the send
 // (cinatra-ai/cinatra#3745): it sends nothing and returns the counts and the
-// content digest that the send step hands on to the send start.
+// content digest of the pending send.
 const OTHER_STEP_NAMES = {
   [PREPARE]: ["email_outreach_send_initial_preview", "objects_get"],
   [FILING]: ["extension_tool", "recipient_records"],
   [READ]: ["extension_tool", "send_contents"],
 };
 
-test("the send step's text names the tools and words this suite lists and no other (red: any new snake_case name or name( call in the send step's call data)", () => {
-  assert.deepEqual(namesIn(steps[SEND]), [...SEND_STEP_TOOLS, ...SEND_STEP_WORDS].sort());
+test("the send step names the send start and no other tool (red: any other snake_case name or name( call in the send step's call data)", () => {
+  assert.deepEqual(namesIn(steps[SEND]), SEND_STEP_TOOLS);
 });
 
-test("the send primitives on the send step's list are exactly the primitives the manifest consumes (red: a primitive consumed and not listed, or listed and not consumed)", () => {
+test("the send start is the one primitive the manifest consumes (red: a primitive consumed and not called, or called and not consumed)", () => {
   const consumed = (pkg.cinatra.consumes ?? []).map((c) => c.primitive).sort();
-  assert.deepEqual(SEND_STEP_TOOLS.filter((n) => n !== "objects_get"), consumed);
+  assert.deepEqual(consumed, SEND_STEP_TOOLS);
 });
 
 test("every other step names the tools this suite lists for it and no other (red: a new tool-shaped name in a step's call data, a send tool on a step before the send, or a step added or removed)", () => {
   const others = Object.entries(steps).filter(([id, c]) => c.component_type === "ApiNode" && id !== SEND);
   assert.deepEqual(others.map(([id]) => id).sort(), Object.keys(OTHER_STEP_NAMES).sort());
   for (const [id, step] of others) assert.deepEqual(namesIn(step), OTHER_STEP_NAMES[id], id);
+  const sendTools = ["email_outreach_send_initial_start", "email_outreach_send_initial_status", "email_outreach_send_initial_cancel"];
+  for (const [id, step] of others) {
+    for (const name of sendTools) assert.ok(!namesIn(step).includes(name), `${id} names ${name}`);
+  }
 });
 
-// -- the send step's tool offer ---------------------------------------------
+// -- the model steps' tool offer --------------------------------------------
 
 /** The host's reading of a model-bridge step's declaration, `metadata.cinatra.tools`. */
 function readDeclaration(node) {
@@ -311,35 +351,20 @@ test("the copy of the host's declaration reader reads the cases its rule names",
   }
 });
 
-// What this flow declares for its model steps. The send step declares the
-// tools its recipe calls, so the host offers it those and no other; the
-// prepare step declares nothing. This is a change detector: a change of the
-// send step's list changes this constant in the same commit.
-const SEND_STEP_DECLARATION = { kind: "declared", tools: SEND_STEP_TOOLS };
-
-test("the send and prepare steps' declarations read as this suite pins them (a change detector: red on a changed list on the send step, or a `tools` key on the prepare step)", () => {
-  assert.deepEqual(readDeclaration(steps[SEND]), SEND_STEP_DECLARATION);
-  assert.deepEqual(readDeclaration(steps[PREPARE]), { kind: "undeclared" });
-});
-
-test("the send step's declared list is exactly the tools its text calls (red: no list, a tool the text calls and the list lacks, or a tool the list holds and the text does not call)", () => {
-  const reading = readDeclaration(steps[SEND]);
-  assert.equal(reading.kind, "declared", "the send step declares no list");
-  assert.deepEqual([...reading.tools].sort(), SEND_STEP_TOOLS);
-  const called = namesIn(steps[SEND]).filter((name) => !SEND_STEP_WORDS.includes(name));
-  assert.deepEqual([...reading.tools].sort(), called);
-});
-
-test("the list is written in the form the host reads and sits on a model-bridge step only (red: a `tools` key on a step that is not a model step)", () => {
+// The host reads `metadata.cinatra.tools` on a model-bridge step only and
+// refuses the key on any other step (OAS-RUNTIME-015). The flow's one model
+// step, the prepare step, declares nothing, and the send step is no model step,
+// so no step of the flow carries the key and no model step is offered the send.
+test("no step declares a tool list, and the one model step is the read-only prepare step (red: a `tools` key on any step, or a second model step)", () => {
   const withKey = Object.entries(steps)
     .filter(([, c]) => Object.hasOwn(c.metadata?.cinatra ?? {}, "tools"))
     .map(([id]) => id);
-  assert.deepEqual(withKey, [SEND]);
-  assert.match(steps[SEND].url, /\/api\/llm-bridge$/);
-  assert.equal(steps[SEND].id, SEND, "the host reads a declaration by the step's id");
-  assert.deepEqual(
-    Object.values(steps).filter((c) => c.id === SEND).length,
-    1,
-    "two steps share the send step's id",
-  );
+  assert.deepEqual(withKey, []);
+  assert.deepEqual(readDeclaration(steps[PREPARE]), { kind: "undeclared" });
+  const modelSteps = Object.entries(steps)
+    .filter(([, c]) => c.component_type === "ApiNode" && String(c.url).endsWith("/api/llm-bridge"))
+    .map(([id]) => id);
+  assert.deepEqual(modelSteps, [PREPARE]);
+  assert.equal(steps[PREPARE].metadata.cinatra.riskClass, "read_only");
+  assert.equal(Object.values(steps).filter((c) => c.id === SEND).length, 1, "two steps share the send step's id");
 });

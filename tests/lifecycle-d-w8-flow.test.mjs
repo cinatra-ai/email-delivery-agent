@@ -1,10 +1,10 @@
 // Lifecycle D W8 — the email delivery agent's plain ending (cinatra#3096 item 19).
 //
 // (19) A delivery run closes with one plain sentence after the send: how many
-// campaign emails went out and how many could not be sent, or that none went
-// out, with the reason when the send reports one — never with the raw result
-// object or a bare failure code. The result object is still handed on at the
-// end for an agent that started the run.
+// campaign emails went out, or that the send stopped, with the reason when the
+// send reports one, or that no send ran — never with the raw answer.
+// The send start's answer (its status, the number sent and the reason of a
+// failure) is still handed on at the end for an agent that started the run.
 //
 // Three more arms check this flow against the rules the runtime applies when
 // it mounts a flow, the same rules cinatra-ai/email-outreach-agent checks for
@@ -39,7 +39,7 @@ const dataEdges = (oas.data_flow_connections ?? []).map((e) => [
 const countDataEdges = (from, to) => dataEdges.filter(([f, t]) => f === from && t === to).length;
 const outsideComment = (message) => String(message ?? "").replace(/\{#[\s\S]*?#\}/g, "");
 
-const MESSAGE = "{# pyagentspec-input-hint (do not remove): {{ sendResult }} #}{% if not sendResult or not sendResult.status %}No campaign email was sent in this run.{% elif sendResult.status == 'completed' %}{% if sendResult.totalSent == 1 %}1 campaign email was sent{% elif sendResult.totalSent %}{{ sendResult.totalSent }} campaign emails were sent{% else %}The send finished, but no campaign email went out{% endif %}{% if sendResult.totalFailed %}, and {{ sendResult.totalFailed }} could not be sent{% endif %}.{% elif sendResult.errorCode == 'OBJECTS_FETCH_FAILED' %}No campaign email was sent: the approved drafts or the confirmed recipients could not be read.{% elif sendResult.errorCode == 'APPROVED_BODIES_MISSING' %}No campaign email was sent: the approved email bodies the publish card showed did not reach the send.{% elif sendResult.errorCode == 'POLL_BUDGET_EXHAUSTED' %}The send did not report its end in time, so it is not known how many campaign emails went out; check the campaign before you send again.{% elif sendResult.errorMessage %}The campaign emails could not be sent: {{ sendResult.errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}";
+const MESSAGE = "{# pyagentspec-input-hint (do not remove): {{ status }} {{ sentCount }} {{ errorMessage }} #}{% if status == 'completed' %}{% if sentCount == 1 %}1 campaign email was sent.{% elif sentCount %}{{ sentCount }} campaign emails were sent.{% else %}The send finished, but no campaign email went out.{% endif %}{% elif status == 'failed' %}{% if errorMessage %}The campaign emails could not be sent: {{ errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}{% else %}No campaign email was sent in this run.{% endif %}";
 
 test("(19) the run ends in plain language after the send, never in the envelope", () => {
   const summary = refs.delivery_summary;
@@ -49,25 +49,35 @@ test("(19) the run ends in plain language after the send, never in the envelope"
   assert.ok(hasEdge("send", "delivery_summary"), "the send does not lead to the closing statement");
   assert.ok(hasEdge("delivery_summary", "end"), "the closing statement does not lead to the end");
   assert.ok(!hasEdge("send", "end"), "the run still jumps from the send straight to its end");
-  assert.deepEqual(refs.end.outputs.map((o) => o.title), ["sendResult"]);
+  // The send start's answer is still handed on at the end, for an agent that started the run.
+  assert.deepEqual(refs.end.outputs.map((o) => o.title), ["sendStatus", "sentCount", "sendErrorMessage"]);
+  assert.equal(countDataEdges("send.status", "end.sendStatus"), 1);
+  assert.equal(countDataEdges("send.sentCount", "end.sentCount"), 1);
+  assert.equal(countDataEdges("send.errorMessage", "end.sendErrorMessage"), 1);
 });
 
-test("(19) an empty, failed or finished send ends in the sentence as written", () => {
+test("(19) an empty, failed or finished send ends in the sentence as written, from the send start's answer", () => {
   const summary = refs.delivery_summary;
   assert.ok(summary, "the run has no closing statement");
   assert.equal(summary.message, MESSAGE);
   assert.equal(summary.metadata?.cinatra?.purpose, "plain-language-delivery-ending");
-  assert.deepEqual(summary.inputs, [{ title: "sendResult", type: "object", default: {} }]);
-  assert.equal(countDataEdges("send.sendResult", "delivery_summary.sendResult"), 1);
-  assert.doesNotMatch(outsideComment(summary.message), /\{\{\s*sendResult\.errorCode/, "the bare failure code is printed");
+  assert.deepEqual(summary.inputs, [
+    { title: "status", type: "string", default: "" },
+    { title: "sentCount", type: "integer", default: 0 },
+    { title: "errorMessage", type: "string", default: "" },
+  ]);
+  for (const name of ["status", "sentCount", "errorMessage"]) {
+    assert.equal(countDataEdges(`send.${name}`, `delivery_summary.${name}`), 1, `the closing statement's ${name} is not the send's`);
+  }
 });
 
-test("(19) every failure code the send step names has its own sentence", () => {
-  const system = String(refs.send.data.system ?? "");
-  const codes = [...new Set([...system.matchAll(/errorCode[^A-Za-z]{1,6}([A-Z][A-Z0-9_]+)/g)].map((m) => m[1]))].sort();
-  assert.deepEqual(codes, ["APPROVED_BODIES_MISSING", "OBJECTS_FETCH_FAILED", "POLL_BUDGET_EXHAUSTED"]);
-  const message = String(refs.delivery_summary?.message ?? "");
-  for (const code of codes) assert.ok(message.includes(`sendResult.errorCode == '${code}'`), `no sentence for ${code}`);
+// A failed send start answers its reason as text; the sentence says that the
+// emails could not be sent and why, and never that none went out, because a
+// send that stops part way answers failed.
+test("(19) a failed send ends with its reason and never claims that no email went out", () => {
+  const failed = MESSAGE.slice(MESSAGE.indexOf("{% elif status == 'failed' %}"), MESSAGE.lastIndexOf("{% else %}"));
+  assert.ok(failed.includes("{{ errorMessage }}"), "a failed send does not say what stopped it");
+  assert.doesNotMatch(failed, /No campaign email was sent/, "a failed send claims that none went out");
 });
 
 test("(19) the closing statement follows the send, the send follows the read step alone, and the read step follows the filing step alone", () => {
@@ -209,14 +219,7 @@ test("(19) every declared default fits its declared type", () => {
     "the runtime refuses a default its declared type does not allow: " + misfits.join(", "),
   );
 
-  const sendResult = (refs.delivery_summary?.inputs ?? []).find((i) => i.title === "sendResult");
-  const fallback = sendResult?.default;
-  assert.ok(
-    fallback !== null && typeof fallback === "object" && !Array.isArray(fallback) && Object.keys(fallback).length === 0,
-    "the closing statement's send result does not default to an empty object",
-  );
   const message = String(refs.delivery_summary?.message ?? "");
-  const guard = message.indexOf("{% if not sendResult");
-  assert.ok(guard >= 0, "the closing sentence does not test for a run with no send result");
-  assert.ok(guard < message.indexOf("sendResult."), "the sentence reads a member before it tests for a run with no send result");
+  assert.ok(message.indexOf("{% if status == 'completed' %}") >= 0, "the closing sentence does not test the send's status first");
+  assert.ok(message.endsWith("{% else %}No campaign email was sent in this run.{% endif %}"), "a run with no answer from the send does not end in its own sentence");
 });

@@ -174,23 +174,42 @@ function sourceOf(step, input) {
 
 test("the send call carries approvedBodies from the one input the card's Emails row shows, and no contentDigest", () => {
   const send = refs.send;
-  const { system, user } = send.data;
-  const block = system.match(/```json\n(\{\n {2}"campaignId"[\s\S]*?\n\})\n```/);
-  assert.ok(block, "the send text carries no argument block");
-  const keys = Object.keys(JSON.parse(block[1])).sort();
-  assert.deepEqual(keys, ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"]);
-  assert.ok(!system.includes("contentDigest"), "the send text still names the digest");
-  assert.ok(!user.includes("contentDigest"), "the send input text still carries the digest");
+  assert.deepEqual(Object.keys(send.data.input).sort(), ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"]);
+  assert.ok(!JSON.stringify(send.data).includes("contentDigest"), "the send call still names the digest");
   assert.equal(inputOf(send, "contentDigest"), undefined, "the send step still takes the digest");
   assert.equal(dataEdges.filter((e) => refOf(e.destination_node) === "send" && e.destination_input === "contentDigest").length, 0);
-  // The value the send passes as approvedBodies is the input the Emails row shows.
+  // The value the send passes as approvedBodies is the input the Emails row shows, as JSON text: the passthrough
+  // road hands a template value on as a string, and the send start reads a list from it.
   const emails = send.metadata.cinatra.publishRows.find((row) => row.label === "Emails");
   assert.equal(emails.kind, "artifacts");
-  assert.ok(user.includes(`- approvedBodies: {{ ${emails.input} | tojson }}`), "the send input text does not render approvedBodies from the Emails row's input");
+  assert.ok(send.data.input.approvedBodies.endsWith(`{{ ${emails.input} | tojson }}`), "the send call does not render approvedBodies from the Emails row's input");
   // That input is the read step's output, and the read step runs right before the send.
   assert.equal(sourceOf("send", emails.input), "resolve_send.emailBodies");
   const into = (oas.control_flow_connections ?? []).filter((e) => refOf(e.to_node) === "send").map((e) => refOf(e.from_node));
   assert.deepEqual(into, ["resolve_send"], "a run reaches the send other than through the read step");
+});
+
+// An empty list never reaches the send: the send step is reached only from the
+// read step and takes its bodies only from it, and the read step refuses (the
+// passthrough road answers a refusal with an error, which ends the run) every
+// run whose list would be empty. A list it hands on holds one body per mailed
+// draft, so it is never empty.
+test("a run whose list of bodies would be empty ends at the read step, so the send never takes an empty list", async () => {
+  await refusal(call([]), /./);
+  await refusal(
+    extensionTool({ input: { recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, callToAction: "Book a call." }, ports: ports() }),
+    /./,
+  );
+  await refusal(call(POSITIONAL, ports({ drafts: [] })), /nothing to send/);
+  const noAddress = DRAFTS.map((draft) => ({ ...draft, recipientEmail: "" })).map(({ contactId, ...rest }) => ({ ...rest, recipientId: rest.recipientId ?? contactId }));
+  const unaddressed = { ...LIST, data: { confirmedRecipients: LIST.data.confirmedRecipients.map(({ email, ...rest }) => rest) } };
+  const p = ports({ drafts: noAddress });
+  p.objects.read = async ({ objectId }) => structuredClone(objectId === LIST_REF ? unaddressed : bundleOf(noAddress));
+  await refusal(call(POSITIONAL, p), /mail nothing|address/);
+  const answer = await call(POSITIONAL);
+  assert.ok(answer.emailBodies.length >= 1);
+  assert.equal(answer.emailBodies.length, answer.recipients.length);
+  assert.equal(Object.hasOwn(inputOf(refs.send, "emailBodies"), "default"), false, "the send step can start without the read step's list");
 });
 
 test("the read step's bodies and the send's bodies carry the contact the send start joins on", () => {

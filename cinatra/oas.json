@@ -3,7 +3,7 @@
   "component_type": "Flow",
   "id": "email-delivery-flow",
   "name": "Email Delivery Agent",
-  "description": "Owner-controlled email delivery. Sending an email is an external write, so the application holds the send step until a person decides on its publish card: the card shows the rows the send step declares (the sending mailbox, the recipients, the emails and the call to action), and the run reaches the send only after the person chose to send. The flow draws no confirmation of its own. A read-only prepare step reports the counts and the content digest of the pending send, a filing step files one recipient record per confirmed recipient, a read step resolves the approved draft bundle and the confirmed recipient list (the two references the send start reads) into the recipients and the email bodies the send mails, which are the values the card shows, and the send itself is the single-ApiNode /api/llm-bridge path calling email_outreach_send_initial_start with the approved bodies the card showed.",
+  "description": "Owner-controlled email delivery. Sending an email is an external write, so the application holds the send step until a person decides on its publish card: the card shows the rows the send step declares (the sending mailbox, the recipients, the emails and the call to action), and the run reaches the send only after the person chose to send. The flow draws no confirmation of its own. A read-only prepare step reports the counts and the content digest of the pending send, a filing step files one recipient record per confirmed recipient, a read step resolves the approved draft bundle and the confirmed recipient list (the two references the send start reads) into the recipients and the email bodies the send mails, which are the values the card shows, and the send itself is a model-free call of email_outreach_send_initial_start on the passthrough road, whose arguments are the flow's values: the sender and the two references from the start, and the approved bodies the card showed from the read step. The run ends with one plain sentence on the send start's answer.",
   "metadata": {
     "cinatra": {
       "type": "flow",
@@ -85,8 +85,22 @@
   ],
   "outputs": [
     {
-      "title": "sendResult",
-      "type": "object"
+      "title": "sendStatus",
+      "type": "string",
+      "default": "",
+      "description": "The status the send start answered: completed, or failed; the empty string when no send ran."
+    },
+    {
+      "title": "sentCount",
+      "type": "integer",
+      "default": 0,
+      "description": "The number of campaign emails the send start reports as sent."
+    },
+    {
+      "title": "sendErrorMessage",
+      "type": "string",
+      "default": "",
+      "description": "What stopped a failed send; the empty string otherwise."
     }
   ],
   "start_node": {
@@ -324,30 +338,6 @@
     },
     {
       "component_type": "DataFlowEdge",
-      "name": "send_sendResult_to_end",
-      "source_node": {
-        "$component_ref": "send"
-      },
-      "source_output": "sendResult",
-      "destination_node": {
-        "$component_ref": "end"
-      },
-      "destination_input": "sendResult"
-    },
-    {
-      "component_type": "DataFlowEdge",
-      "name": "send_sendResult_to_delivery_summary",
-      "source_node": {
-        "$component_ref": "send"
-      },
-      "source_output": "sendResult",
-      "destination_node": {
-        "$component_ref": "delivery_summary"
-      },
-      "destination_input": "sendResult"
-    },
-    {
-      "component_type": "DataFlowEdge",
       "name": "start_agent_run_id_to_file_recipients",
       "source_node": {
         "$component_ref": "start"
@@ -441,6 +431,78 @@
         "$component_ref": "resolve_send"
       },
       "destination_input": "callToAction"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_status_to_delivery_summary",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "status",
+      "destination_node": {
+        "$component_ref": "delivery_summary"
+      },
+      "destination_input": "status"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_sentCount_to_delivery_summary",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "sentCount",
+      "destination_node": {
+        "$component_ref": "delivery_summary"
+      },
+      "destination_input": "sentCount"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_errorMessage_to_delivery_summary",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "errorMessage",
+      "destination_node": {
+        "$component_ref": "delivery_summary"
+      },
+      "destination_input": "errorMessage"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_status_to_end_sendStatus",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "status",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "sendStatus"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_sentCount_to_end",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "sentCount",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "sentCount"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_errorMessage_to_end_sendErrorMessage",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "errorMessage",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "sendErrorMessage"
     }
   ],
   "$referenced_components": {
@@ -810,18 +872,18 @@
       "component_type": "ApiNode",
       "id": "send",
       "name": "Send campaign emails",
-      "url": "{{CINATRA_BASE_URL}}/api/llm-bridge",
+      "url": "{{CINATRA_BASE_URL}}/api/agents/passthrough",
       "http_method": "POST",
       "data": {
-        "agent_id": "email-delivery",
-        "max_steps": 10,
-        "system": "You are the email-delivery agent. A person decided on this send on the application's publish card, which showed them the sending mailbox, the recipients, the emails and the call to action; the run reaches you only after they chose to send. Your sole responsibility is to EXECUTE the send: call email_outreach_send_initial_start once, then poll email_outreach_send_initial_status with the campaignId to completion, and return sendResult. Do NOT ask for a confirmation (the publish card is the one place the person decides) and do NOT re-validate drafts/recipients/sender (that happened upstream). Follow the instructions below step-by-step. All sends route through sendEmailThroughSystem, which applies dev-mode redirect at the bridge layer.\n\nYou are the **email-delivery** agent. Sending an email is an external write, so\nthe application holds this step until a person decides on its publish card.\nThe card shows the rows this step declares: the sending mailbox, the\nrecipients, the emails and the call to action. By the time these instructions\nrun, the upstream orchestrator (typically `@cinatra-ai/email-outreach-agent`)\nhas ALREADY:\n\n1. Selected the sender email.\n2. Approved the drafts bundle.\n3. Confirmed the recipient list.\n\n…and the person chose to send on the publish card. A run whose person did not\nchoose to send never reaches you. Your sole responsibility is to EXECUTE the\nsend and return `sendResult`. Do NOT ask for a confirmation and do NOT\nre-validate drafts/recipients/sender (that happened upstream).\n\n## STEP 1 — Resolve context\n\n- `objects_get({ objectId: approvedDraftBundleRef })` → `drafts[]` (each draft\n  has `subject`, `bodyHtml`, `recipientPersonaId` or similar fields per the\n  email-outreach domain model).\n- `objects_get({ objectId: confirmedRecipientsRef })` → `recipients[]` (each\n  recipient has `email`, `firstName`, etc.).\n\nIf either fetch fails, return immediately with:\n\n```json\n{ \"sendResult\": { \"status\": \"failed\", \"errorCode\": \"OBJECTS_FETCH_FAILED\", \"errorMessage\": \"<details>\" } }\n```\n\n## STEP 2 — Send via `email_outreach_send_initial_start`\n\nCall exactly once, with these five arguments and no other key:\n\n```json\n{\n  \"campaignId\": \"<campaignId input>\",\n  \"senderEmail\": \"<senderEmail input>\",\n  \"approvedDraftBundleRef\": \"<approvedDraftBundleRef input>\",\n  \"confirmedRecipientsRef\": \"<confirmedRecipientsRef input>\",\n  \"approvedBodies\": [\"<each entry of the approvedBodies input>\"]\n}\n```\n\n`approvedBodies` is a JSON list: the email bodies the person saw on the\npublish card, one per mailed draft, each with the keys `artifactId`,\n`representationRevisionId` and `contactId`. Pass it as that list, never as\ntext, with every entry and every value exactly as the input gives it. The send\nstart mails the text of these bodies and refuses the send when one of them does\nnot fit its draft.\n\nPass every value exactly as the input gives it, character for character.\nLeave out a key whose input is empty; never add a key, and never fill in a\nvalue of your own. `approvedBodies` is never left out: when its input is empty\nor not a list, do NOT call email_outreach_send_initial_start and return\n`sendResult` with `status: \"failed\"`, `errorCode: \"APPROVED_BODIES_MISSING\"`\nand an `errorMessage` that says the approved email bodies are missing. The application admits this one call only together with\nthe person's decision on the publish card and uses that decision up, so a\nsecond call is refused.\n\nThe use case iterates `recipients[] × drafts[]` and routes every\n`sendGmailMessage` through `sendEmailThroughSystem` (the dev-mode redirect\nchokepoint). The handler returns an `operationId` that identifies the async\nwork.\n\n## STEP 3 — Poll for completion\n\nCall `email_outreach_send_initial_status` with `{ campaignId }` until\n`status === \"completed\"` or `status === \"failed\"`.\n\nCap retries to FIVE iterations max (the bridge enforces `max_steps: 10`\non this ApiNode — exceeding it returns control to WayFlow with no terminal\nstatus, which is treated as failure). If the status never terminates within\nfive polls, return `sendResult.status: \"failed\"` with\n`errorCode: \"POLL_BUDGET_EXHAUSTED\"`.\n\n## STEP 4 — Return sendResult\n\nReturn ONLY this JSON object — no prose, no Markdown wrapping:\n\n```json\n{\n  \"sendResult\": {\n    \"status\": \"completed\" | \"failed\",\n    \"totalSent\": <number>,\n    \"totalFailed\": <number>,\n    \"operationId\": \"<uuid>\",\n    \"errorCode\": \"<optional, only when status='failed'>\",\n    \"errorMessage\": \"<optional, only when status='failed'>\",\n    \"summary\": \"<one plain sentence: how many messages went out and, on a failure, what stopped the send>\"\n  }\n}\n```\n\n## Known limitations\n\n- **The underlying send use case is currently stubbed.** Both\n  `email_outreach_send_initial_start` and `email_outreach_send_initial_status`\n  throw `not implemented` in `src/lib/trigger-email-send-use-cases.ts`. As a\n  result this agent MOUNTS in WayFlow but does NOT actually deliver email\n  end-to-end. Until those use cases land, `agent_run` against this agent will\n  fail at STEP 2 with a propagated \"not implemented\" error — that failure is\n  correct constrained behavior.\n- The agent does not use `FlowNode` or `TriggerWaitNode`. `FlowNode` requires a\n  `subflow` field, and `TriggerWaitNode` is not yet a real pyagentspec\n  component. This constrained shape removes both so the WayFlow `/.health`\n  endpoint goes green.\n\n## Architecture context\n\n- **Constrained send shape:** sender HITL, trigger subflow, and\n  `TriggerWaitNode` are intentionally absent from this version of the agent.\n  `FlowNode` requires a `subflow` field, and `TriggerWaitNode` is not yet a\n  real pyagentspec component; using either would prevent the agent from\n  mounting. Trigger/wait machinery should return only after the underlying\n  primitives exist.\n- **dev-mode redirect:** `sendEmailThroughSystem` (in `src/lib/email-system.ts`)\n  is the single chokepoint that applies the dev-mode `forwardingDestination`\n  override. All sends from this agent route through it so direct\n  `sendGmailMessage` imports cannot bypass the redirect.\n- **No follow-ups:** this agent handles initial sends only.\n\n## How inputs arrive\n\nThis agent is normally invoked via `agent_run` from\n`@cinatra-ai/email-outreach-agent`, which provides the send inputs\n`campaignId`, `approvedDraftBundleRef`, `confirmedRecipientsRef` and\n`senderEmail`, and the values the publish card shows: `senderEmail`,\n`recipients`, `emailBodies` and `callToAction`. The `agent_run_id` input is\nautomatically supplied by the runtime — leave its default `\"\"` in place.\n\nIt can also be invoked standalone via `agent_run` for testing — the operator\nsupplies the inputs directly through the run form. The send still waits for\nthe person's decision on the publish card.",
-        "user": "{# pyagentspec-input-hint (do not remove): {{ recipients }} {{ emailBodies }} {{ callToAction }} #}The person chose to send on the publish card. Execute the campaign send now.\nInputs:\n- campaignId: {{ campaignId }}\n- approvedDraftBundleRef: {{ approvedDraftBundleRef }}\n- confirmedRecipientsRef: {{ confirmedRecipientsRef }}\n- senderEmail: {{ senderEmail }}\n- approvedBodies: {{ emailBodies | tojson }}",
-        "agent_run_id": "{{ agent_run_id }}",
-        "cinatra_llm": {
-          "preferredProvider": "openai",
-          "preferredModel": "gpt-5.5"
-        }
+        "tool": "email_outreach_send_initial_start",
+        "input": {
+          "campaignId": "{{ campaignId }}",
+          "senderEmail": "{{ senderEmail }}",
+          "approvedDraftBundleRef": "{{ approvedDraftBundleRef }}",
+          "confirmedRecipientsRef": "{{ confirmedRecipientsRef }}",
+          "approvedBodies": "{# pyagentspec-input-hint (do not remove): {{ emailBodies }} {{ recipients }} {{ callToAction }} #}{{ emailBodies | tojson }}"
+        },
+        "agent_run_id": "{{ agent_run_id }}"
       },
       "inputs": [
         {
@@ -912,55 +974,28 @@
       ],
       "outputs": [
         {
-          "title": "sendResult",
-          "type": "object",
-          "description": "The terminal result of the approved send. Every member is always present: the structured-output contract the runtime derives from this declaration carries no optional key, so errorCode and errorMessage are the empty string when status is completed.",
-          "json_schema": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "completed",
-                  "failed"
-                ],
-                "description": "The terminal status polled from email_outreach_send_initial_status."
-              },
-              "totalSent": {
-                "type": "integer",
-                "description": "Messages the send operation reported as sent."
-              },
-              "totalFailed": {
-                "type": "integer",
-                "description": "Messages the send operation reported as failed."
-              },
-              "operationId": {
-                "type": "string",
-                "description": "The operation identifier email_outreach_send_initial_start returned, or the empty string when the send never started."
-              },
-              "errorCode": {
-                "type": "string",
-                "description": "The failure code when status is failed, otherwise the empty string."
-              },
-              "errorMessage": {
-                "type": "string",
-                "description": "The failure detail when status is failed, otherwise the empty string."
-              },
-              "summary": {
-                "type": "string",
-                "description": "One plain sentence for the person who confirmed the send: how many messages went out and, when the send failed, what stopped it."
-              }
-            },
-            "required": [
-              "status",
-              "totalSent",
-              "totalFailed",
-              "operationId",
-              "errorCode",
-              "errorMessage",
-              "summary"
-            ]
-          }
+          "title": "status",
+          "type": "string",
+          "default": "",
+          "description": "The status the send start answered: completed, or failed when the send stopped; the empty string when the answer carried none."
+        },
+        {
+          "title": "sentCount",
+          "type": "integer",
+          "default": 0,
+          "description": "The number of messages the send start reports as sent."
+        },
+        {
+          "title": "operationId",
+          "type": "string",
+          "default": "",
+          "description": "The operation identifier the send start answered."
+        },
+        {
+          "title": "errorMessage",
+          "type": "string",
+          "default": "",
+          "description": "What stopped a failed send, as the send start answered it; the empty string for a completed send."
         }
       ],
       "metadata": {
@@ -1005,12 +1040,7 @@
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
           "a2uiSurfaceId": "email-delivery:step-1:output",
-          "description": "Single ApiNode → /api/llm-bridge and the publishing step of this flow: sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action). The Recipients, Emails and Call to action rows take their values from the read step in front of this step, which resolves the same two references this step passes to the send start, so the card shows what the send mails. The step runs only after the person chose to send, and the application admits its one email_outreach_send_initial_start call only together with that decision, used once. The LLM reads approvedDraftBundleRef + confirmedRecipientsRef via objects_get and calls email_outreach_send_initial_start (the #1946 send primitive) with the two references, the sender and approvedBodies, the list the card's Emails row shows, so the send mails the text of the approved body revisions the person saw. metadata.cinatra.toolboxes is INTENTIONALLY OMITTED so the default always-inject path runs — the LLM reaches objects_get and email_outreach_send_initial_start via the injected Cinatra self-MCP. requiresApproval is false because the publish card is the one approval in front of the send.",
-          "tools": [
-            "email_outreach_send_initial_start",
-            "email_outreach_send_initial_status",
-            "objects_get"
-          ],
+          "description": "The flow's one publishing step and a model-free call of email_outreach_send_initial_start on the deterministic passthrough road (/api/agents/passthrough). Sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action); the run reaches the step only after the person chose to send. Every argument of the call is a template over one of this step's inputs, and every input comes by a data edge from the start node or from the read step in front of this step: the campaign, the sender and the two references from the start node, and approvedBodies, the list the card's Emails row shows, from the read step, as JSON text. No model writes an argument, so the send start mails the approved body revisions the person saw, from the mailbox the card showed, and refuses the whole send before any mail when one of them does not fit its draft. The passthrough road serves the send start only to a listed publishing step of the run's flow whose publish decision is released, once; a host whose road does not serve it answers the call with an error, the run ends and nothing is sent. The step returns the send start's answer: its status (completed or failed), the number of messages sent, the operation id and, for a failed send, the reason. requiresApproval is false because the publish card is the one approval in front of the send.",
           "confirmations": [
             {
               "tool": "email_outreach_send_initial_start",
@@ -1026,12 +1056,22 @@
       "name": "Delivery result",
       "inputs": [
         {
-          "title": "sendResult",
-          "type": "object",
-          "default": {}
+          "title": "status",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "sentCount",
+          "type": "integer",
+          "default": 0
+        },
+        {
+          "title": "errorMessage",
+          "type": "string",
+          "default": ""
         }
       ],
-      "message": "{# pyagentspec-input-hint (do not remove): {{ sendResult }} #}{% if not sendResult or not sendResult.status %}No campaign email was sent in this run.{% elif sendResult.status == 'completed' %}{% if sendResult.totalSent == 1 %}1 campaign email was sent{% elif sendResult.totalSent %}{{ sendResult.totalSent }} campaign emails were sent{% else %}The send finished, but no campaign email went out{% endif %}{% if sendResult.totalFailed %}, and {{ sendResult.totalFailed }} could not be sent{% endif %}.{% elif sendResult.errorCode == 'OBJECTS_FETCH_FAILED' %}No campaign email was sent: the approved drafts or the confirmed recipients could not be read.{% elif sendResult.errorCode == 'APPROVED_BODIES_MISSING' %}No campaign email was sent: the approved email bodies the publish card showed did not reach the send.{% elif sendResult.errorCode == 'POLL_BUDGET_EXHAUSTED' %}The send did not report its end in time, so it is not known how many campaign emails went out; check the campaign before you send again.{% elif sendResult.errorMessage %}The campaign emails could not be sent: {{ sendResult.errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}",
+      "message": "{# pyagentspec-input-hint (do not remove): {{ status }} {{ sentCount }} {{ errorMessage }} #}{% if status == 'completed' %}{% if sentCount == 1 %}1 campaign email was sent.{% elif sentCount %}{{ sentCount }} campaign emails were sent.{% else %}The send finished, but no campaign email went out.{% endif %}{% elif status == 'failed' %}{% if errorMessage %}The campaign emails could not be sent: {{ errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}{% else %}No campaign email was sent in this run.{% endif %}",
       "metadata": {
         "cinatra": {
           "purpose": "plain-language-delivery-ending"
@@ -1044,9 +1084,19 @@
       "name": "End",
       "outputs": [
         {
-          "title": "sendResult",
-          "type": "object",
-          "default": {}
+          "title": "sendStatus",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "title": "sentCount",
+          "type": "integer",
+          "default": 0
+        },
+        {
+          "title": "sendErrorMessage",
+          "type": "string",
+          "default": ""
         }
       ]
     }
