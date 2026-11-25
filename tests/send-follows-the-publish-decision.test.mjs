@@ -223,14 +223,17 @@ test("the send start always takes the approved bodies in the strict form: the li
 });
 
 test("the send step's outputs are the members of the send start's answer, each with a default (red: an output the answer does not carry, or one without a default)", () => {
-  // The send start answers { operationId, kind, status, startedAt, completedAt, sentCount, errorMessage }; the road
-  // hands each declared output from the member of the same name, and errorMessage is absent from a completed send.
+  // The send start answers { operationId, kind, status, startedAt, completedAt, sentCount, errorMessage } and, in its
+  // strict form, alreadySentCount and inDoubtCount; the road hands each declared output from the member of the same
+  // name, and a member the answer lacks takes the output's default.
   const declared = (steps[SEND].outputs ?? []).map(({ title, type, default: fallback }) => ({ title, type, default: fallback }));
   assert.deepEqual(declared, [
     { title: "status", type: "string", default: "" },
     { title: "sentCount", type: "integer", default: 0 },
     { title: "operationId", type: "string", default: "" },
     { title: "errorMessage", type: "string", default: "" },
+    { title: "alreadySentCount", type: "integer", default: 0 },
+    { title: "inDoubtCount", type: "integer", default: 0 },
   ]);
 });
 

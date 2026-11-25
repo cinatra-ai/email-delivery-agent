@@ -103,6 +103,18 @@
       "type": "string",
       "default": "",
       "description": "What stopped a failed send; the empty string otherwise."
+    },
+    {
+      "title": "alreadySentCount",
+      "type": "integer",
+      "default": 0,
+      "description": "The number of messages an earlier call of the send start had already sent, which this call skipped; 0 when the answer carries none."
+    },
+    {
+      "title": "inDoubtCount",
+      "type": "integer",
+      "default": 0,
+      "description": "The number of messages whose send was started and never confirmed: the send start does not mail them again, and a person checks with the mail provider whether they went out; 0 when the answer carries none."
     }
   ],
   "start_node": {
@@ -472,6 +484,30 @@
     },
     {
       "component_type": "DataFlowEdge",
+      "name": "send_alreadySentCount_to_delivery_summary",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "alreadySentCount",
+      "destination_node": {
+        "$component_ref": "delivery_summary"
+      },
+      "destination_input": "alreadySentCount"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_inDoubtCount_to_delivery_summary",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "inDoubtCount",
+      "destination_node": {
+        "$component_ref": "delivery_summary"
+      },
+      "destination_input": "inDoubtCount"
+    },
+    {
+      "component_type": "DataFlowEdge",
       "name": "send_status_to_end_sendStatus",
       "source_node": {
         "$component_ref": "send"
@@ -505,6 +541,30 @@
         "$component_ref": "end"
       },
       "destination_input": "sendErrorMessage"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_alreadySentCount_to_end",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "alreadySentCount",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "alreadySentCount"
+    },
+    {
+      "component_type": "DataFlowEdge",
+      "name": "send_inDoubtCount_to_end",
+      "source_node": {
+        "$component_ref": "send"
+      },
+      "source_output": "inDoubtCount",
+      "destination_node": {
+        "$component_ref": "end"
+      },
+      "destination_input": "inDoubtCount"
     }
   ],
   "$referenced_components": {
@@ -1030,6 +1090,18 @@
           "type": "string",
           "default": "",
           "description": "What stopped a failed send, as the send start answered it; the empty string for a completed send."
+        },
+        {
+          "title": "alreadySentCount",
+          "type": "integer",
+          "default": 0,
+          "description": "The number of messages an earlier call of the send start had already sent, which this call skipped; 0 when the answer carries none."
+        },
+        {
+          "title": "inDoubtCount",
+          "type": "integer",
+          "default": 0,
+          "description": "The number of messages whose send was started and never confirmed: the send start does not mail them again, and a person checks with the mail provider whether they went out; 0 when the answer carries none."
         }
       ],
       "metadata": {
@@ -1078,7 +1150,7 @@
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
           "a2uiSurfaceId": "email-delivery:step-1:output",
-          "description": "The flow's one publishing step and a model-free call of email_outreach_send_initial_start on the deterministic passthrough road (/api/agents/passthrough). Sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action); the run reaches the step only after the person chose to send. Every argument of the call is a template over one of this step's inputs, and every input comes by a data edge from the start node or from the read step in front of this step: the campaign, the sender and the two references from the start node, and approvedBodies, the list the card's Emails row shows, from the read step, as JSON text. No model writes an argument, so the send start mails the approved body revisions the person saw, from the mailbox the card showed, to the addresses and with the subjects the card showed (each approved body names the address and the subject of its draft), and refuses the whole send before any mail when one of them does not fit its draft or a message would go to another address or with another subject. The passthrough road serves the send start only to a listed publishing step of the run's flow whose publish decision is released, once; a host whose road does not serve it answers the call with an error, the run ends and nothing is sent. The step returns the send start's answer: its status (completed or failed), the number of messages sent, the operation id and, for a failed send, the reason. requiresApproval is false because the publish card is the one approval in front of the send.",
+          "description": "The flow's one publishing step and a model-free call of email_outreach_send_initial_start on the deterministic passthrough road (/api/agents/passthrough). Sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action); the run reaches the step only after the person chose to send. Every argument of the call is a template over one of this step's inputs, and every input comes by a data edge from the start node or from the read step in front of this step: the campaign, the sender and the two references from the start node, and approvedBodies, the list the card's Emails row shows, from the read step, as JSON text. No model writes an argument, so the send start mails the approved body revisions the person saw, from the mailbox the card showed, to the addresses and with the subjects the card showed (each approved body names the address and the subject of its draft), and refuses the whole send before any mail when one of them does not fit its draft or a message would go to another address or with another subject. The passthrough road serves the send start only to a listed publishing step of the run's flow whose publish decision is released, once; a host whose road does not serve it answers the call with an error, the run ends and nothing is sent. The step returns the send start's answer: its status (completed or failed), the number of messages sent by this call, the operation id and, for a failed send, the reason, and the number of messages an earlier call had already sent (skipped now) and the number in doubt (started and never confirmed, not sent again; a person checks with the mail provider). requiresApproval is false because the publish card is the one approval in front of the send.",
           "confirmations": [
             {
               "tool": "email_outreach_send_initial_start",
@@ -1107,9 +1179,19 @@
           "title": "errorMessage",
           "type": "string",
           "default": ""
+        },
+        {
+          "title": "alreadySentCount",
+          "type": "integer",
+          "default": 0
+        },
+        {
+          "title": "inDoubtCount",
+          "type": "integer",
+          "default": 0
         }
       ],
-      "message": "{# pyagentspec-input-hint (do not remove): {{ status }} {{ sentCount }} {{ errorMessage }} #}{% if status == 'completed' %}{% if sentCount == 1 %}1 campaign email was sent.{% elif sentCount %}{{ sentCount }} campaign emails were sent.{% else %}The send finished, but no campaign email went out.{% endif %}{% elif status == 'failed' %}{% if errorMessage %}The campaign emails could not be sent: {{ errorMessage }}{% else %}The campaign emails could not be sent, and the send gave no reason.{% endif %}{% else %}No campaign email was sent in this run.{% endif %}",
+      "message": "{# pyagentspec-input-hint (do not remove): {{ status }} {{ sentCount }} {{ errorMessage }} {{ alreadySentCount }} {{ inDoubtCount }} #}{% if status == 'completed' %}{% if sentCount == 1 %}1 campaign email was sent.{% elif sentCount %}{{ sentCount }} campaign emails were sent.{% else %}The send finished, but no campaign email went out.{% endif %}{% else %}{% if status == 'failed' %}{% if errorMessage %}The send stopped: {{ errorMessage }}{% else %}The send stopped, and it gave no reason.{% endif %}{% elif sentCount or inDoubtCount %}The send did not report a result.{% else %}No campaign email was sent in this run.{% endif %}{% if status == 'failed' or sentCount or inDoubtCount %}\n\n{% if sentCount == 1 %}1 email went out in this run, and repeating the send will not send it again.{% elif sentCount %}{{ sentCount }} emails went out in this run, and repeating the send will not send them again.{% elif inDoubtCount %}No email is confirmed as sent in this run.{% else %}No email was sent in this run.{% endif %}{% endif %}{% endif %}{% if alreadySentCount == 1 %} 1 email had already been sent before this send, and was skipped.{% elif alreadySentCount %} {{ alreadySentCount }} emails had already been sent before this send, and were skipped.{% endif %}{% if inDoubtCount == 1 %} 1 email may or may not have gone out: check with your mail provider before sending again. This send does not send it again.{% elif inDoubtCount %} {{ inDoubtCount }} emails may or may not have gone out: check with your mail provider before sending again. This send does not send them again.{% endif %}",
       "metadata": {
         "cinatra": {
           "purpose": "plain-language-delivery-ending"
@@ -1135,6 +1217,16 @@
           "title": "sendErrorMessage",
           "type": "string",
           "default": ""
+        },
+        {
+          "title": "alreadySentCount",
+          "type": "integer",
+          "default": 0
+        },
+        {
+          "title": "inDoubtCount",
+          "type": "integer",
+          "default": 0
         }
       ]
     }
