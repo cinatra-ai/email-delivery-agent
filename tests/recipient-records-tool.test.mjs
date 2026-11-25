@@ -5,6 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const { extensionTool } = await import(new URL("../cinatra/tools/recipient-records.mjs", import.meta.url));
 
@@ -219,4 +220,104 @@ test("R9 a row that is not a recipient, or names neither a contact nor an addres
     assert.match(caught.message, /\b3\b/);
     assert.equal(calls.saves.length, 0);
   }
+});
+
+// The send's read step refuses a confirmed recipient list of more than 50 rows
+// (TOO_MANY_RECIPIENTS). This step runs earlier in the flow, so it holds the
+// same bound: a list the send is certain to refuse creates no record.
+
+const sendContents = await import(new URL("../cinatra/tools/send-contents.mjs", import.meta.url));
+
+const uniqueRows = (count) => Array.from({ length: count }, (_, k) => ({ contactId: `c-${k + 1}`, email: `p${k + 1}@example.org` }));
+
+async function assertTooManyRecipients(data) {
+  const { ports, calls } = makePorts({ list: listOf(data) });
+  let caught;
+  await extensionTool({ input: { recipientsRef: "list-1" }, ports }).catch((e) => { caught = e; });
+  assert.ok(caught, "the call is refused");
+  assertRefusal(caught);
+  assert.match(caught.message, /^TOO_MANY_RECIPIENTS: /);
+  assert.match(caught.message, /\b50\b/);
+  assert.equal(calls.saves.length, 0, "nothing is saved for a list that is refused");
+}
+
+test("L1 51 unique valid rows are refused with the code of the send and nothing is saved", async () => {
+  await assertTooManyRecipients({ confirmedRecipients: uniqueRows(51) });
+  await assertTooManyRecipients({ recipients: uniqueRows(51) });
+});
+
+test("L2 50 unique valid rows are saved as before; repeated rows count once", async () => {
+  const exact = makePorts({ list: listOf({ confirmedRecipients: uniqueRows(50) }) });
+  assert.deepEqual(await extensionTool({ input: { recipientsRef: "list-1" }, ports: exact.ports }), { ok: true, filed: 50, skipped: 0 });
+  assert.equal(exact.calls.saves.length, 50);
+
+  const repeated = makePorts({ list: listOf({ confirmedRecipients: [...uniqueRows(50), ...uniqueRows(10)] }) });
+  assert.deepEqual(await extensionTool({ input: { recipientsRef: "list-1" }, ports: repeated.ports }), { ok: true, filed: 50, skipped: 10 });
+  assert.equal(repeated.calls.saves.length, 50);
+});
+
+/** Rows that count every time the module looks into one. */
+function countingRows(count, keyOf) {
+  const work = { looks: 0 };
+  const rows = Array.from({ length: count }, (_, k) => ({
+    get contactId() {
+      work.looks += 1;
+      return keyOf(k);
+    },
+  }));
+  return { rows, work };
+}
+
+test("L3 a huge list is refused without processing its rows", async () => {
+  const unique = countingRows(1_000_000, (k) => `c-${k}`);
+  await assertTooManyRecipients({ confirmedRecipients: unique.rows });
+  assert.equal(unique.work.looks, 0, "no row is looked into");
+
+  const repeated = countingRows(1_000_000, () => "same");
+  await assertTooManyRecipients({ confirmedRecipients: repeated.rows });
+  assert.equal(repeated.work.looks, 0, "no row is looked into");
+});
+
+test("L4 a long list of unique rows stops at the 51st unique row", async () => {
+  const { rows, work } = countingRows(900, (k) => `c-${k}`);
+  await assertTooManyRecipients({ confirmedRecipients: rows });
+  assert.ok(work.looks > 0 && work.looks <= 2 * 51, `looked ${work.looks} times`);
+});
+
+test("L5 the filing step and the read step take one limit", async () => {
+  const limitOf = async (file) => {
+    const source = await readFile(new URL(`../cinatra/tools/${file}`, import.meta.url), "utf8");
+    const found = [...source.matchAll(/^const MAX_RECIPIENT_ROWS = (\d+);$/gm)];
+    assert.equal(found.length, 1, `${file} declares the limit once`);
+    return Number(found[0][1]);
+  };
+  const limit = await limitOf("recipient-records.mjs");
+  assert.equal(limit, await limitOf("send-contents.mjs"));
+
+  // The read step refuses one row above that value and passes the value itself.
+  const rows = uniqueRows(limit + 1);
+  const objects = {
+    list: { objectId: "list", type: LIST, data: { confirmedRecipients: rows } },
+    bundle: {
+      objectId: "bundle",
+      type: "@cinatra-ai/campaigns:email-draft-bundle",
+      data: { drafts: [{ recipientId: "c-1", subject: "S", recipientEmail: "a@example.org" }] },
+    },
+  };
+  const ports = {
+    objects: { read: async ({ objectId }) => objects[objectId] },
+    artifacts: { read: async () => assert.fail("no artifact is read") },
+  };
+  const input = {
+    recipientsRef: "list",
+    draftBundleRef: "bundle",
+    callToAction: "Book a call.",
+    emailBodies: JSON.stringify([{ artifactId: "b-1", representationRevisionId: "v-1" }]),
+  };
+  await assert.rejects(() => sendContents.extensionTool({ input, ports }), /TOO_MANY_RECIPIENTS: /);
+  objects.list.data.confirmedRecipients = rows.slice(0, limit);
+  await assert.rejects(
+    () => sendContents.extensionTool({ input, ports }),
+    (error) => !/TOO_MANY_RECIPIENTS/.test(error.message),
+  );
 });

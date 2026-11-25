@@ -70,6 +70,8 @@ const MAX_MAILED_DRAFTS = 50;
 // as well. The limits are checked before any artifact is read.
 const MAX_BUNDLE_DRAFTS = 50;
 const MAX_BODIES = 50;
+// The filing step (recipient-records.mjs) declares the same value, as a module
+// of this package imports nothing; a test keeps the two equal.
 const MAX_RECIPIENT_ROWS = 50;
 // The most bytes of one body a read takes: the cap the artifacts port itself
 // applies to any text read. A body that does not fit comes back cut off and is

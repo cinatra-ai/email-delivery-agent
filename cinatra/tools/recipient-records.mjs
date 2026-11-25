@@ -12,10 +12,24 @@
 // that is not a recipient, or names neither a contact nor an address, has no
 // key the recipient type accepts, so the call is refused and nothing is filed.
 //
+// The list is bounded before anything is saved, by the limit the send's read
+// step applies to the same list: a list of more unique recipients than that is
+// refused with TOO_MANY_RECIPIENTS and nothing is filed, so a run the send is
+// certain to refuse leaves no record. The count stops at the first row over the limit, and a list of more than
+// MAX_RAW_ROWS rows is refused without looking into any row.
+//
 // Neither the run nor the scope is ever in this file: the host binds the run
 // where a record carries the marker { boundRun: true }, and the port scopes
 // every read and save. A refusal of the port reaches the caller unchanged, so
 // a record the agent may not keep ends the run.
+
+// The most confirmed recipients one send takes: the value the send's read step
+// declares as its own (a module of this package imports nothing, and a test
+// keeps the two equal).
+const MAX_RECIPIENT_ROWS = 50;
+// The most rows of a list this step looks into at all; a generous multiple of
+// the limit, as rows that repeat a contact are skipped, not counted.
+const MAX_RAW_ROWS = MAX_RECIPIENT_ROWS * 20;
 
 const RECIPIENT_TYPE = "@cinatra-ai/email:recipient";
 const RECIPIENTS_LIST_TYPE = "@cinatra-ai/campaigns:recipients";
@@ -54,6 +68,11 @@ export async function extensionTool({ input, ports }) {
     : Array.isArray(list.data.recipients)
       ? list.data.recipients
       : [];
+  if (rows.length > MAX_RAW_ROWS) {
+    throw new ExtensionToolCallRefusal(
+      `TOO_MANY_RECIPIENTS: The run hands in ${rows.length} confirmed recipients; one send takes at most ${MAX_RECIPIENT_ROWS}.`,
+    );
+  }
   const campaignId = trimmedOrNone(input?.campaignId);
 
   const filedKeys = new Set();
@@ -79,6 +98,11 @@ export async function extensionTool({ input, ports }) {
       continue;
     }
     filedKeys.add(key);
+    if (filedKeys.size > MAX_RECIPIENT_ROWS) {
+      throw new ExtensionToolCallRefusal(
+        `TOO_MANY_RECIPIENTS: The run hands in more than ${MAX_RECIPIENT_ROWS} confirmed recipients; one send takes at most ${MAX_RECIPIENT_ROWS}.`,
+      );
+    }
 
     const data = { runId: { boundRun: true }, contactKey: key };
     if (address !== undefined) data.email = address;
