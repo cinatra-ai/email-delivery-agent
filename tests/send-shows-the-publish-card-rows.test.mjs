@@ -19,8 +19,8 @@
 //
 // These arms hold that the declaration has the form the host's compiler reads
 // (the row grammar of packages/agents/src/oas-compiler.ts, collectPublishRows),
-// that the card shows what the send mails, and that the send's texts and the
-// prepare step's digest still say what the flow does.
+// that the card shows what the send mails, and that the send's texts still say
+// what the flow does.
 //
 // What the card shows and what the send mails come from one source. The send
 // start reads two references, the approved draft bundle and the confirmed
@@ -48,7 +48,6 @@ const PREVIEW_TOOL = "email_outreach_send_initial_preview";
 const SEND = "send";
 const READ = "resolve_send";
 const READ_TOOL = "send_contents";
-const PREPARE = "prepare";
 // The send start's arguments; approvedBodies is the list the Emails row shows, rendered from the send step's emailBodies.
 const ARGUMENTS = ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"];
 const ARGUMENT_SOURCE = { approvedBodies: "emailBodies | tojson" };
@@ -231,23 +230,12 @@ test("the card's own inputs reach the send step's call only through the input hi
   }
 });
 
-test("the prepare step takes the digest from the read-only preview tool and never computes one", () => {
-  const prepare = refs[PREPARE];
-  const output = (prepare.outputs ?? []).find((entry) => entry.title === "contentDigest");
-  assert.ok(output, "the prepare step declares no contentDigest output");
-  assert.equal(output.type, "string");
-  // The digest is the prepare step's own output; the send start mails the approved bodies and takes no digest.
+test("no step takes or hands on a content digest: the send start mails the approved bodies the card showed", () => {
   assert.equal(inputOf(refs[SEND], "contentDigest"), undefined);
-  assert.ok(!dataEdges.some((e) => refOf(e.source_node) === PREPARE && e.source_output === "contentDigest"));
-  const system = prepare.data.system;
-  assert.ok(system.includes(PREVIEW_TOOL), "the prepare text does not name the preview tool");
-  assert.ok(system.includes('"contentDigest"'), "the prepare text does not name the contentDigest key");
-  assert.ok(system.includes("exactly as the tool returned it"), "the prepare text does not say that the digest is handed on unchanged");
-  assert.ok(system.includes('set "contentDigest" to the empty string ""'), "the prepare text does not say what a failed preview hands on");
-  assert.ok(system.includes("NEVER compute"), "the prepare text does not forbid a computed digest");
-  assert.equal(prepare.metadata.cinatra.riskClass, "read_only");
-  assert.ok(!system.includes(SEND_TOOL), "the prepare text names the send start");
-  assert.doesNotMatch(system, /confirmation gate/, "the prepare text names a confirmation gate the flow no longer has");
+  assert.ok(!dataEdges.some((e) => e.source_output === "contentDigest" || e.destination_input === "contentDigest"));
+  for (const step of Object.values(refs)) {
+    assert.ok(!(step.outputs ?? []).some((entry) => entry.title === "contentDigest"), `${step.id} declares a contentDigest output`);
+  }
 });
 
 test("the send step's call passes the five arguments and no other key, and the texts name the publish card as the one place the person decides", () => {

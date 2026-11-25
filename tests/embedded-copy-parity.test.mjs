@@ -49,15 +49,6 @@ const DIFFERENCES = [
     },
   },
   {
-    name: "the prepare step's model preference is left out",
-    why: "The outreach's steps keep the model preference the outreach gives them.",
-    apply(flow) {
-      const data = flow.$referenced_components.prepare.data;
-      assert.ok(Object.hasOwn(data, "cinatra_llm"), "the prepare step has no model preference");
-      delete data.cinatra_llm;
-    },
-  },
-  {
     name: "the closing sentence (delivery_summary) is left out and the send goes straight to the end",
     why: "The outreach ends once, in its own campaign summary after the copy.",
     apply(flow) {
@@ -129,7 +120,7 @@ test("(7) the embedded copy is this flow, prefixed, with exactly the named diffe
 
 test("(7) the copy carries the read step and the publishing send's call unchanged", () => {
   const steps = copy.$referenced_components;
-  for (const step of ["resolve_send", "send", "file_recipients", "prepare", "start", "end"]) {
+  for (const step of ["resolve_send", "send", "file_recipients", "start", "end"]) {
     assert.ok(steps[PREFIX + step], `the copy has no step ${step}`);
   }
   assert.deepStrictEqual(steps[`${PREFIX}send`].data, oas.$referenced_components.send.data);
@@ -146,6 +137,6 @@ test("(7) the copy carries the read step and the publishing send's call unchange
 });
 
 test("(7) the named differences are the whole list, each with a reason", () => {
-  assert.equal(DIFFERENCES.length, 4);
+  assert.equal(DIFFERENCES.length, 3);
   for (const difference of DIFFERENCES) assert.ok(difference.why.trim().length > 0, difference.name);
 });

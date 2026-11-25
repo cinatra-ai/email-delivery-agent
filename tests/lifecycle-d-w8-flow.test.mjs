@@ -233,7 +233,7 @@ test("(19) the closing statement follows the send, the send follows the read ste
   assert.deepEqual(into("delivery_summary"), ["send"]);
   assert.deepEqual(into("send"), ["resolve_send"]);
   assert.deepEqual(into("resolve_send"), ["file_recipients"]);
-  assert.deepEqual(into("file_recipients"), ["prepare"]);
+  assert.deepEqual(into("file_recipients"), ["start"]);
   assert.deepEqual(into("end"), ["delivery_summary"]);
 });
 

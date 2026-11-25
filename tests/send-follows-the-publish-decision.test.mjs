@@ -16,9 +16,11 @@
 //      the flow draws no confirmation of its own: no step waits for a person,
 //      no root screen is listed, the send step asks for no approval of its
 //      own, and its confirmations list names only the host's publish decision.
-//   2. The send step is reached only along the one path start, prepare,
-//      filing, read, send; nothing branches; after the send the run ends through
-//      the closing statement.
+//   2. The send step is reached only along the one path start, filing, read,
+//      send; nothing branches; after the send the run ends through the closing
+//      statement. No step of the flow is a model step: every step in front of
+//      the send is a model-free passthrough call, so a run reaches the publish
+//      card without handing a record of the campaign to a model.
 //   3. The send step is a model-free passthrough call of the send start. Its
 //      arguments are templates over its own inputs, each fed by a data edge
 //      from the start node or the read step, so the send mails with the values
@@ -67,7 +69,6 @@ const edges = (oas.control_flow_connections ?? []).map((e) => ({
   branch: e.from_branch,
 }));
 
-const PREPARE = "prepare";
 const FILING = "file_recipients";
 const READ = "resolve_send";
 const SEND = "send";
@@ -109,15 +110,14 @@ test("the flow is one flat graph whose steps are the ones this suite names", () 
     [],
     "the flow nests a flow, which this suite does not read",
   );
-  assert.deepEqual([...nodeIds].sort(), ["delivery_summary", "end", FILING, PREPARE, READ, SEND, "start"].sort());
-  assert.equal(steps[PREPARE].component_type, "ApiNode");
+  assert.deepEqual([...nodeIds].sort(), ["delivery_summary", "end", FILING, READ, SEND, "start"].sort());
   assert.equal(steps[FILING].component_type, "ApiNode");
   assert.equal(steps[READ].component_type, "ApiNode");
   assert.match(steps[READ].url, /\/api\/agents\/passthrough$/);
   assert.equal(steps[SEND].component_type, "ApiNode");
   assert.equal(steps[SUMMARY].component_type, "OutputMessageNode");
   assert.match(steps[SEND].url, /\/api\/agents\/passthrough$/);
-  assert.match(steps[PREPARE].url, /\/api\/llm-bridge$/);
+  assert.match(steps[FILING].url, /\/api\/agents\/passthrough$/);
 });
 
 test("the send step is the only step of the flow with the send risk class", () => {
@@ -140,7 +140,6 @@ test("the send step is the flow's one publishing step, a top-level node (red: pu
   assert.equal(steps[FILING].metadata.cinatra.publishes, false);
   assert.equal(steps[READ].metadata.cinatra.publishes, false);
   assert.equal(steps[READ].metadata.cinatra.riskClass, "read_only");
-  assert.equal(steps[PREPARE].metadata.cinatra.riskClass, "read_only");
 });
 
 test("the flow draws no confirmation of its own (red: a step that waits for a person, a root screen, an approval on the send, or a gate renderer)", () => {
@@ -237,11 +236,11 @@ test("the send step's outputs are the members of the send start's answer, each w
   ]);
 });
 
-test("the send step is reached only along start, prepare, filing, read (red: an edge into the send, the read or the filing from any other step)", () => {
+test("the send step is reached only along start, filing, read (red: an edge into the send, the read or the filing from any other step)", () => {
   assert.deepEqual(into(SEND).map((e) => e.from), [READ], "the send has another way in");
   assert.deepEqual(into(READ).map((e) => e.from), [FILING], "the read before the send has another way in");
-  assert.deepEqual(into(FILING).map((e) => e.from), [PREPARE], "the filing before the send has another way in");
-  assert.deepEqual(into(PREPARE).map((e) => e.from), ["start"], "the prepare step has another way in");
+  assert.deepEqual(into(FILING).map((e) => e.from), ["start"], "the filing before the send has another way in");
+  assert.deepEqual(outOf("start").map((e) => e.to), [FILING], "the run does not begin with the filing step");
   assert.ok(reach().has(SEND), "the send is not reachable at all");
   assert.equal(reach(FILING).has(SEND), false, "the send is reachable around the filing step");
   assert.equal(reach(READ).has(SEND), false, "the send is reachable around the read step");
@@ -296,11 +295,8 @@ const SEND_STEP_TOOLS = [SEND_TOOL];
 // one of them, or a step added or removed, fails the suite until this list is
 // changed in the same commit. None of these names is a send tool; a send tool
 // named by any step but the send step is therefore a name that is not on this
-// list. The prepare step's second name is the read-only preview of the send
-// (cinatra-ai/cinatra#3745): it sends nothing and returns the counts and the
-// content digest of the pending send.
+// list.
 const OTHER_STEP_NAMES = {
-  [PREPARE]: ["email_outreach_send_initial_preview", "objects_get"],
   [FILING]: ["extension_tool", "recipient_records"],
   [READ]: ["extension_tool", "send_contents"],
 };
@@ -355,19 +351,43 @@ test("the copy of the host's declaration reader reads the cases its rule names",
 });
 
 // The host reads `metadata.cinatra.tools` on a model-bridge step only and
-// refuses the key on any other step. The flow's one model
-// step, the prepare step, declares nothing, and the send step is no model step,
-// so no step of the flow carries the key and no model step is offered the send.
-test("no step declares a tool list, and the one model step is the read-only prepare step (red: a `tools` key on any step, or a second model step)", () => {
+// refuses the key on any other step. The flow has no model step: the filing,
+// the read and the send are passthrough calls, so no step of the flow carries
+// the key, and no record of the campaign is handed to a model on the way to
+// the send.
+test("no step declares a tool list, and no step of the flow is a model step (red: a `tools` key on any step, or a model step anywhere in the flow)", () => {
   const withKey = Object.entries(steps)
     .filter(([, c]) => Object.hasOwn(c.metadata?.cinatra ?? {}, "tools"))
     .map(([id]) => id);
   assert.deepEqual(withKey, []);
-  assert.deepEqual(readDeclaration(steps[PREPARE]), { kind: "undeclared" });
   const modelSteps = Object.entries(steps)
-    .filter(([, c]) => c.component_type === "ApiNode" && String(c.url).endsWith("/api/llm-bridge"))
+    .filter(([, c]) => /\/api\/llm-bridge\b/.test(String(c.url ?? "")))
     .map(([id]) => id);
-  assert.deepEqual(modelSteps, [PREPARE]);
-  assert.equal(steps[PREPARE].metadata.cinatra.riskClass, "read_only");
+  assert.deepEqual(modelSteps, [], "a step of the flow calls the model bridge");
+  for (const key of ["system", "user", "cinatra_llm", "max_steps"]) {
+    assert.deepEqual(holders(steps, key).map((c) => Object.keys(c)), [], `a step carries a model's ${key}`);
+  }
+  // Every ApiNode in front of the send is a passthrough call.
+  for (const id of [FILING, READ]) assert.match(steps[id].url, /\/api\/agents\/passthrough$/, id);
   assert.equal(Object.values(steps).filter((c) => c.id === SEND).length, 1, "two steps share the send step's id");
+});
+
+test("the former summary step is gone with everything only it used (red: a node, component, edge or text of it left behind)", () => {
+  assert.equal(Object.hasOwn(steps, "prepare"), false, "the flow still has a prepare component");
+  assert.ok(!nodeIds.includes("prepare"), "the flow still lists a prepare node");
+  const all = [...(oas.control_flow_connections ?? []), ...(oas.data_flow_connections ?? [])];
+  for (const e of all) {
+    for (const end of [e.from_node, e.to_node, e.source_node, e.destination_node]) {
+      assert.notEqual(refOf(end), "prepare", `the edge ${e.name} still touches the prepare step`);
+    }
+    assert.doesNotMatch(e.name, /prepare/, `the edge ${e.name} is named after the prepare step`);
+  }
+  const text = JSON.stringify(oas);
+  for (const gone of ["email_outreach_send_initial_preview", "objects_get", "contentDigest", "scheduledAt", "/api/llm-bridge"]) {
+    assert.ok(!text.includes(gone), `the flow still names ${gone}`);
+  }
+  assert.doesNotMatch(oas.description, /prepare step|content digest/i, "the flow's description still names the summary step");
+  // The flow-level model preference served that step alone; with no model step left the run needs no model
+  // provider, so the flow declares none.
+  assert.equal(Object.hasOwn(oas.metadata?.cinatra ?? {}, "llm"), false, "the flow still declares a model provider");
 });

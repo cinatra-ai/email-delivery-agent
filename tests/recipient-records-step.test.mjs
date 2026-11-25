@@ -76,9 +76,9 @@ test("S2 the file_recipients component has the declared shape", () => {
   });
 });
 
-test("S3 the step is listed directly after the prepare step and directly before the read step in front of the send", () => {
+test("S3 the step is listed directly after the start and directly before the read step in front of the send", () => {
   const ids = oas.nodes.map((n) => n.$component_ref);
-  assert.equal(ids[ids.indexOf("prepare") + 1], "file_recipients");
+  assert.equal(ids[ids.indexOf("start") + 1], "file_recipients");
   assert.equal(ids[ids.indexOf("file_recipients") + 1], "resolve_send");
   assert.equal(ids[ids.indexOf("resolve_send") + 1], "send");
 });
@@ -86,14 +86,13 @@ test("S3 the step is listed directly after the prepare step and directly before 
 test("S4 the edge list puts the filing step directly before the read step in front of the send", () => {
   const edges = controlEdges().map(([a, b]) => `${a} -> ${b}`);
   assert.deepEqual(edges, [
-    "start -> prepare",
-    "prepare -> file_recipients",
+    "start -> file_recipients",
     "file_recipients -> resolve_send",
     "resolve_send -> send",
     "send -> delivery_summary",
     "delivery_summary -> end",
   ]);
-  assert.deepEqual(into("file_recipients"), ["prepare"]);
+  assert.deepEqual(into("file_recipients"), ["start"]);
   assert.deepEqual(into("resolve_send"), ["file_recipients"]);
   assert.deepEqual(into("send"), ["resolve_send"]);
 });
