@@ -20,10 +20,10 @@
 // The card's values are bound to the send. Each approved body the step hands
 // on carries the address and the subject of its draft as the step read them,
 // the same address and subject the card's Recipients row shows for that draft.
-// The send start compares, for each message, the address it resolves (trimmed,
-// without regard to case) and the subject it mails with that entry, and
-// refuses the whole send before any mail on a difference. The copy below
-// models that comparison too.
+// The send start compares, entry for entry, the contact, the address it
+// resolves (outer white space removed, then exactly, the case included) and the
+// subject it mails with the approved entry, and refuses the whole send before
+// any mail on a difference. The copy below models that comparison too.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -102,37 +102,47 @@ function ports({ objects = { [LIST_REF]: LIST, [BUNDLE_REF]: BUNDLE }, texts = T
 const call = (input, p = ports()) => extensionTool({ input, ports: p });
 const fullInput = (emailBodies = JSON.stringify(BODIES), callToAction = CALL_TO_ACTION) => ({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies, callToAction });
 
-/** A copy of the send start's reading: the address it hands on for each draft, with which subject and body (before any override of the pipeline). */
+/** The contact key of a draft as the sender derives it: contactId, else recipientId, each trimmed first, a blank one absent. */
+const senderContactOf = (item) => {
+  for (const value of [item.contactId, item.recipientId]) {
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return undefined;
+};
+
+/** A copy of the send start's reading: the address it hands on for each draft, with which contact, subject and body (before any override of the pipeline). */
 function sendMails(bundle, list) {
   const recipients = list.data.confirmedRecipients ?? list.data.recipients ?? [];
   const drafts = bundle.data.drafts ?? bundle.data.confirmedRecipients ?? [];
   const mails = [];
   for (const draft of drafts) {
+    const contact = senderContactOf(draft);
     let to = null;
     if (draft.recipientEmail) to = draft.recipientEmail;
     else if (draft.email) to = draft.email;
-    else if (draft.contactId) {
-      const match = recipients.find((r) => r.contactId === draft.contactId);
+    else if (contact !== undefined) {
+      const match = recipients.find((r) => senderContactOf(r) === contact);
       to = match?.email || match?.recipientEmail || null;
     }
-    if (!to) continue;
-    const contact = (draft.contactId ?? draft.recipientId ?? "").trim();
+    to = typeof to === "string" ? to.trim() : "";
+    if (to === "") continue;
     mails.push({ to, contact, subject: draft.subject, body: draft.body ?? draft.bodyHtml ?? "" });
   }
   return mails;
 }
 
 /**
- * A copy of the send start's comparison of the approved bodies with what it mails: each message's approved entry,
- * joined by the contact, must name the address the send resolves (trimmed, without regard to case) and the subject
- * it mails. One difference refuses the whole send, before any mail. Returns the refusal, or null when the send goes.
+ * A copy of the send start's comparison of the approved bodies with what it mails: the list is compared with the
+ * messages entry for entry, and each entry must name the contact, the address (outer white space removed, then
+ * byte for byte) and the subject of its message. One difference refuses the whole send, before any mail.
+ * Returns the refusal, or null when the send goes.
  */
 function sendRefusal(mails, approvedBodies) {
-  const norm = (value) => String(value ?? "").trim().toLowerCase();
-  for (const mail of mails) {
-    const entry = approvedBodies.find((body) => body.contactId === mail.contact);
-    if (!entry) return `no approved body for contact ${mail.contact}`;
-    if (norm(entry.recipientEmail) !== norm(mail.to)) return `the address of contact ${mail.contact} differs`;
+  if (approvedBodies.length !== mails.length) return `${approvedBodies.length} approved bodies for ${mails.length} messages`;
+  for (const [index, mail] of mails.entries()) {
+    const entry = approvedBodies[index];
+    if (entry.contactId !== mail.contact) return `the contact of message ${index + 1} differs`;
+    if (String(entry.recipientEmail).trim() !== mail.to) return `the address of contact ${mail.contact} differs`;
     if (entry.subject !== mail.subject) return `the subject of contact ${mail.contact} differs`;
   }
   return null;
@@ -200,10 +210,15 @@ test("the address a draft takes from the recipient list is the one its approved 
 
 test("an address or a subject that changes after the card was shown refuses the send in the model of the send start", async () => {
   const answer = await call(fullInput());
-  // The same address in another case and with outer space is the same address.
-  const recased = structuredClone(BUNDLE);
-  recased.data.drafts[0].recipientEmail = "  ADA@example.com ";
-  assert.equal(sendRefusal(sendMails(recased, LIST), answer.emailBodies), null);
+  // The same address with outer space is the same address; the same letters in another case are not.
+  const spaced = structuredClone(BUNDLE);
+  spaced.data.drafts[0].recipientEmail = "  ada@example.com ";
+  assert.equal(sendRefusal(sendMails(spaced, LIST), answer.emailBodies), null);
+  for (const recasedAddress of ["ADA@example.com", "Ada@example.com", "ada@EXAMPLE.com", "  ada@Example.com "]) {
+    const recased = structuredClone(BUNDLE);
+    recased.data.drafts[0].recipientEmail = recasedAddress;
+    assert.match(sendRefusal(sendMails(recased, LIST), answer.emailBodies), /address of contact c-1/, recasedAddress);
+  }
   const readdressed = structuredClone(LIST);
   readdressed.data.confirmedRecipients[1].email = "someone-else@example.com";
   assert.match(sendRefusal(sendMails(BUNDLE, readdressed), answer.emailBodies), /address of contact c-2/);
@@ -319,4 +334,133 @@ test("a run without a call to action is refused before the card", async () => {
 test("a body that is not mailed need not carry the call to action", async () => {
   assert.ok(!TEXTS["a-3"].includes(CALL_TO_ACTION));
   assert.equal((await call(fullInput())).callToAction, CALL_TO_ACTION);
+});
+
+// ---- the address is the exact string a person approved ----
+
+test("the card shows an address exactly as the draft writes it, outer white space removed, and the send takes no other case", async () => {
+  const bundle = structuredClone(BUNDLE);
+  bundle.data.drafts[0].recipientEmail = "  Ada.Lovelace@Example.COM ";
+  const objects = { [LIST_REF]: LIST, [BUNDLE_REF]: bundle };
+  const answer = await call(fullInput(), ports({ objects }));
+  assert.equal(answer.recipients[0].email, "Ada.Lovelace@Example.COM");
+  assert.equal(answer.emailBodies[0].recipientEmail, "Ada.Lovelace@Example.COM");
+  assert.equal(sendRefusal(sendMails(bundle, LIST), answer.emailBodies), null, "the exact address is sent");
+  for (const changed of ["ada.lovelace@example.com", "ada.lovelace@Example.COM", "Ada.Lovelace@example.com", "Ada.Lovelace@Example.COM.", "Ada.Lovelace@Example.CO"]) {
+    const after = structuredClone(bundle);
+    after.data.drafts[0].recipientEmail = changed;
+    assert.match(sendRefusal(sendMails(after, LIST), answer.emailBodies), /address of contact c-1/, changed);
+  }
+});
+
+test("a list row gives its name and company to a draft only for exactly the draft's address", async () => {
+  const list = structuredClone(LIST);
+  list.data.confirmedRecipients = [{ contactId: "c-other", name: "Row Name", email: "ada@example.com", company: "Row Company" }];
+  const draftWith = (recipientEmail) => ({ contactId: "c-9", recipientEmail, subject: "S", body: ONE_TEXT });
+  const bodies = JSON.stringify([{ artifactId: "a-1", representationRevisionId: "r-1", contactId: "c-9" }]);
+  const run = (recipientEmail) =>
+    call(fullInput(bodies), ports({ objects: { [LIST_REF]: list, [BUNDLE_REF]: { objectId: BUNDLE_REF, type: BUNDLE.type, data: { drafts: [draftWith(recipientEmail)] } } }, texts: { "a-1": ONE_TEXT } }));
+  const same = await run(" ada@example.com ");
+  assert.deepEqual([same.recipients[0].name, same.recipients[0].company], ["Row Name", "Row Company"]);
+  const recased = await run("Ada@example.com");
+  assert.deepEqual([recased.recipients[0].name, recased.recipients[0].company], ["", ""], "another case is another address, so no row is its row");
+  assert.equal(recased.recipients[0].email, "Ada@example.com");
+});
+
+// ---- one rule for the contact key ----
+
+/** The rule, written out: trim first, a blank is absent, then the fallback. */
+const keyRule = (contactId, recipientId) => {
+  const text = (v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+  return text(contactId) ?? text(recipientId);
+};
+const KEY_ROWS = [
+  [" c-1 ", undefined],
+  ["", "c-2"],
+  ["   ", " c-3 "],
+  [undefined, "c-4"],
+  [null, " c-5"],
+  ["c-6", "c-7"],
+  [7, "c-8"],
+  [undefined, undefined],
+  ["  ", "  "],
+  ["", ""],
+];
+const withKeys = (item, contactId, recipientId) => {
+  const out = { ...item };
+  if (contactId !== undefined) out.contactId = contactId;
+  if (recipientId !== undefined) out.recipientId = recipientId;
+  return out;
+};
+const oneList = (rows) => ({ objectId: LIST_REF, type: LIST.type, data: { confirmedRecipients: rows } });
+const oneBundle = (draft) => ({ objectId: BUNDLE_REF, type: BUNDLE.type, data: { drafts: [draft] } });
+const ONE_TEXT = "Hello.\n\nBook a call.";
+const onePorts = (list, bundle) => ports({ objects: { [LIST_REF]: list, [BUNDLE_REF]: bundle }, texts: { "a-1": ONE_TEXT } });
+const oneBody = JSON.stringify([{ artifactId: "a-1", representationRevisionId: "r-1" }]);
+const recordsModule = await import(new URL("../cinatra/tools/recipient-records.mjs", import.meta.url));
+
+test("every place that derives a contact key derives the same one from the same rows", async () => {
+  for (const [contactId, recipientId] of KEY_ROWS) {
+    const expected = keyRule(contactId, recipientId);
+    const label = JSON.stringify([contactId, recipientId]);
+
+    // The read step, for a draft that has its own address.
+    const draft = withKeys({ subject: "S", body: ONE_TEXT, recipientEmail: "x@example.com" }, contactId, recipientId);
+    const own = call(fullInput(oneBody, "Book a call."), onePorts(oneList([]), oneBundle(draft)));
+    if (expected === undefined) assert.match(await refusal(own), /names no contact/, label);
+    else assert.equal((await own).emailBodies[0].contactId, expected, label);
+
+    // The sender's derivation (the copy of it in this file).
+    assert.equal(senderContactOf(withKeys({}, contactId, recipientId)), expected, label);
+    if (expected !== undefined) assert.equal(sendMails(oneBundle(draft), oneList([]))[0].contact, expected, label);
+
+    // The read step, for the address a draft without one takes from the list row of its contact.
+    if (expected !== undefined) {
+      const row = withKeys({ email: "row@example.com", name: "Row" }, contactId, recipientId);
+      const decoy = { contactId: "someone-else", email: "decoy@example.com" };
+      const bare = { subject: "S", body: ONE_TEXT, contactId: expected };
+      const answer = await call(fullInput(oneBody, "Book a call."), onePorts(oneList([decoy, row]), oneBundle(bare)));
+      assert.equal(answer.recipients[0].email, "row@example.com", label);
+      assert.equal(sendMails(oneBundle(bare), oneList([decoy, row]))[0].to, "row@example.com", label);
+    }
+
+    // The filing step, for a row with an address.
+    const saved = [];
+    const filingPorts = {
+      objects: {
+        read: async () => oneList([withKeys({ email: "r@example.com" }, contactId, recipientId)]),
+        save: async ({ data }) => saved.push(data),
+      },
+    };
+    await recordsModule.extensionTool({ input: { recipientsRef: "list" }, ports: filingPorts });
+    assert.equal(saved[0].contactKey, expected === undefined ? "email:r@example.com" : `contact:${expected}`, label);
+  }
+});
+
+test("a draft with a blank contactId and a valid recipientId reaches the card with its recipientId and the send finds its approved body", async () => {
+  for (const blank of ["", "   "]) {
+    const bundle = structuredClone(BUNDLE);
+    bundle.data.drafts[0].contactId = blank;
+    const objects = { [LIST_REF]: LIST, [BUNDLE_REF]: bundle };
+    for (const bodies of [BODIES, BODIES.map((b, i) => ({ ...b, contactId: ["c-1", "c-2", "c-3"][i] }))]) {
+      const answer = await call(fullInput(JSON.stringify(bodies)), ports({ objects }));
+      assert.equal(answer.emailBodies[0].contactId, "c-1");
+      assert.equal(sendMails(bundle, LIST)[0].contact, "c-1");
+      assert.equal(sendRefusal(sendMails(bundle, LIST), answer.emailBodies), null, `blank ${JSON.stringify(blank)}`);
+    }
+  }
+});
+
+test("the filing step and the read step declare the contact key function with one text", () => {
+  const sourceOf = (file) => readFileSync(join(root, "cinatra", "tools", file), "utf8");
+  const textOf = (file) => {
+    const found = [...sourceOf(file).matchAll(/^const contactKeyOf = .*;$/gm)];
+    assert.equal(found.length, 1, `${file} declares the function once`);
+    return found[0][0];
+  };
+  assert.equal(textOf("recipient-records.mjs"), textOf("send-contents.mjs"));
+  for (const file of ["recipient-records.mjs", "send-contents.mjs"]) {
+    const found = sourceOf(file).match(/trimmedOrNone\((?:draft|row|item)\.contactId\)/g) ?? [];
+    assert.equal(found.length, 1, `${file} derives a contact key in one place only`);
+  }
 });

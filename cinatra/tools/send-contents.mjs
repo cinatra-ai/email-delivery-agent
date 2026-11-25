@@ -10,8 +10,12 @@
 // through the objects port and gives the send step:
 //   - the recipients the send mails: one line per draft that has an address,
 //     with the address chosen as the send chooses it (the draft's own address,
-//     else the address of the confirmed recipient with the draft's contact).
-//     This is the address the send start hands to the email pipeline. When the
+//     else the address of the confirmed recipient with the draft's contact),
+//     with its outer white space removed and otherwise exactly as written, in
+//     the same case. This is the address the send start hands to the email
+//     pipeline, and the send compares it with the approved one byte for byte, so
+//     an address that differs in case, in its local part or its domain, from the
+//     one on the card is another address and refuses the send. When the
 //     workspace's development-mode recipient override is on, the pipeline mails
 //     the override address instead; no port of this module can read that
 //     setting, so the list does not show it;
@@ -19,7 +23,9 @@
 //     run hands in, the contact of its draft (the draft's contactId, else its
 //     recipientId), and the address and the subject of that draft as read here:
 //     the value the send step passes to the send start as approvedBodies, and
-//     the value the card's Emails row shows. The address and the subject are
+//     the value the card's Emails row shows. The contact of a draft is its
+//     contactId, else its recipientId, each trimmed first, a blank one counting
+//     as absent; one rule serves the draft, the list row and the filing step. The address and the subject are
 //     the ones the card's Recipients row shows for the same draft. The send
 //     start compares each message's address and subject with them and refuses
 //     the whole send before any mail on a difference, so a draft or a list
@@ -95,6 +101,13 @@ const isPlainObject = (value) => {
 const trimmedOrNone = (value) =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
+// The contact key of a draft or a recipient row: its contactId, else its
+// recipientId. Each is trimmed first, and a blank one is absent. The filing
+// step (recipient-records.mjs) declares the same function as a module of this
+// package imports nothing; a test keeps the two texts equal and runs both on
+// the same rows.
+const contactKeyOf = (item) => trimmedOrNone(item.contactId) ?? trimmedOrNone(item.recipientId);
+
 const textOrEmpty = (value) => (typeof value === "string" ? value.trim() : "");
 
 // An array value reaches the step as JSON text (the step renders it with
@@ -124,17 +137,23 @@ function recipientRowsOf(data) {
   return [];
 }
 
-// The address the send start mails a draft to: the draft's own address, else
-// the address of the confirmed recipient with the draft's contact.
+// The address a draft is mailed to: the draft's own address, else the address
+// of the confirmed recipient with the draft's contact key. Only the outer white
+// space is removed; the text is otherwise kept as it is, in the same case, and
+// is the string the card shows and the send compares, byte for byte.
 function sendAddressOf(draft, rows) {
-  if (draft.recipientEmail) return draft.recipientEmail;
-  if (draft.email) return draft.email;
-  if (draft.contactId) {
-    const match = rows.find((row) => isPlainObject(row) && row.contactId === draft.contactId);
-    if (match?.email) return match.email;
-    if (match?.recipientEmail) return match.recipientEmail;
+  let address = null;
+  if (draft.recipientEmail) address = draft.recipientEmail;
+  else if (draft.email) address = draft.email;
+  else {
+    const contact = contactKeyOf(draft);
+    if (contact !== undefined) {
+      const match = rows.find((row) => isPlainObject(row) && contactKeyOf(row) === contact);
+      if (match?.email) address = match.email;
+      else if (match?.recipientEmail) address = match.recipientEmail;
+    }
   }
-  return null;
+  return trimmedOrNone(address) ?? null;
 }
 
 // The body the send start mails for a draft.
@@ -145,17 +164,14 @@ const sendBodyOf = (draft) => draft.body ?? draft.bodyHtml ?? "";
 const subjectOf = (draft) =>
   typeof draft.subject === "string" && draft.subject.trim() !== "" ? draft.subject : undefined;
 
-// The confirmed recipient a draft is for, for its name and company only.
+// The confirmed recipient a draft is for, for its name and company only: the
+// row with the draft's contact key, else the row with exactly the draft's
+// address (the same text, the case included).
 function rowOf(draft, rows, address) {
-  const contact = trimmedOrNone(draft.contactId) ?? trimmedOrNone(draft.recipientId);
-  const lower = address.toLowerCase();
+  const contact = contactKeyOf(draft);
   return (
-    rows.find((row) => isPlainObject(row) && contact !== undefined && trimmedOrNone(row.contactId) === contact) ??
-    rows.find(
-      (row) =>
-        isPlainObject(row) &&
-        [row.email, row.recipientEmail].some((value) => typeof value === "string" && value.trim().toLowerCase() === lower),
-    )
+    rows.find((row) => isPlainObject(row) && contact !== undefined && contactKeyOf(row) === contact) ??
+    rows.find((row) => isPlainObject(row) && [row.email, row.recipientEmail].some((value) => trimmedOrNone(value) === address))
   );
 }
 
@@ -251,7 +267,7 @@ export async function extensionTool({ input, ports }) {
     if (!isPlainObject(draft)) {
       throw new ExtensionToolCallRefusal(`Approved draft ${position} of this run is not a draft.`);
     }
-    const contact = trimmedOrNone(draft.contactId) ?? trimmedOrNone(draft.recipientId);
+    const contact = contactKeyOf(draft);
     if (contact !== undefined) {
       if (draftByContact.has(contact)) {
         throw new ExtensionToolCallRefusal(
@@ -261,7 +277,7 @@ export async function extensionTool({ input, ports }) {
       draftByContact.set(contact, index);
     }
     const address = sendAddressOf(draft, rows);
-    return { draft, position, contact, address: address ? String(address) : null, body: undefined };
+    return { draft, position, contact, address, body: undefined };
   });
 
   // Join each body to exactly one draft: by the contact it names, or, when no

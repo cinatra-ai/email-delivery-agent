@@ -79,7 +79,7 @@ test("R1 one record per confirmed recipient, keyed by the contact or else by the
   assert.deepEqual(calls.saves, [
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "contact:c-1", email: "Ann@Example.org", campaignId: "camp-1", confirmed: true } },
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "contact:c-2", campaignId: "camp-1", confirmed: true } },
-    { type: RECIPIENT, data: { runId: BOUND, contactKey: "email:cy@example.org", email: "Cy@Example.org", campaignId: "camp-1", confirmed: true } },
+    { type: RECIPIENT, data: { runId: BOUND, contactKey: "email:Cy@example.org", email: "Cy@Example.org", campaignId: "camp-1", confirmed: true } },
     { type: RECIPIENT, data: { runId: BOUND, contactKey: "email:dee@example.org", email: "dee@example.org", campaignId: "camp-1", confirmed: true } },
   ]);
   assert.equal(Object.hasOwn(calls.saves[1].data, "email"), false);
@@ -101,11 +101,29 @@ async function whitespaceCases() {
   const answer = await extensionTool({ input: { recipientsRef: "list-1" }, ports });
   assert.deepEqual(calls.saves.map((s) => s.data), [
     { runId: BOUND, contactKey: "contact:c-9", confirmed: true },
-    { runId: BOUND, contactKey: "email:zed@example.org", email: "Zed@Example.org", confirmed: true },
+    { runId: BOUND, contactKey: "email:Zed@example.org", email: "Zed@Example.org", confirmed: true },
     { runId: BOUND, contactKey: "contact:c-bare", confirmed: true },
   ]);
   assert.deepEqual(answer, { ok: true, filed: 3, skipped: 0 });
 }
+
+test("R1b two addresses that differ in the case of the local part are two recipients; one that differs only in the case of the domain is one", async () => {
+  const { ports, calls } = makePorts({
+    list: listOf({
+      confirmedRecipients: [
+        { email: "Ann@Example.org" },
+        { email: "ann@example.org" },
+        { email: "Ann@EXAMPLE.ORG" },
+      ],
+    }),
+  });
+  const answer = await extensionTool({ input: { recipientsRef: "list-1" }, ports });
+  assert.deepEqual(calls.saves.map((s) => [s.data.contactKey, s.data.email]), [
+    ["email:Ann@example.org", "Ann@Example.org"],
+    ["email:ann@example.org", "ann@example.org"],
+  ]);
+  assert.deepEqual(answer, { ok: true, filed: 2, skipped: 1 });
+});
 
 test("R2 the recipients array is used alone; confirmedRecipients wins when both exist", async () => {
   const only = makePorts({ list: listOf({ recipients: [{ contactId: "r-1", email: "r1@example.org" }, { contactId: "r-2", email: "r2@example.org" }] }) });

@@ -5,7 +5,8 @@
 // module reads the run's confirmed recipient list through the objects port,
 // then saves one record of the recipient type for each confirmed recipient,
 // one at a time and in list order. A record is keyed by the contact when the
-// row names one, else by the lower-cased address, and carries the address only
+// row names one (its contactId, else its recipientId), else by its address (the
+// domain in lower case, the local part exactly as written), and carries the address only
 // where the row has one, so a contact without an address is filed by its key
 // alone. A contact that an earlier row of the same list already filed is not
 // filed twice. Every row is checked before the first record is saved: a row
@@ -50,6 +51,23 @@ const isPlainObject = (value) => {
 const trimmedOrNone = (value) =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
+// The contact key of a draft or a recipient row: its contactId, else its
+// recipientId. Each is trimmed first, and a blank one is absent. The send's
+// read step (send-contents.mjs) declares the same function as a module of this
+// package imports nothing; a test keeps the two texts equal and runs both on
+// the same rows.
+const contactKeyOf = (item) => trimmedOrNone(item.contactId) ?? trimmedOrNone(item.recipientId);
+
+// What two rows without a contact must share to be one recipient: the address
+// with its domain in lower case, which is how a domain is compared, and its
+// local part exactly as written, because a local part may tell two mailboxes
+// apart by case. Two addresses of one key are one mailbox in every reading; the
+// record keeps the address as the row has it.
+function addressKeyOf(address) {
+  const at = address.lastIndexOf("@");
+  return at < 0 ? address : `${address.slice(0, at)}@${address.slice(at + 1).toLowerCase()}`;
+}
+
 export async function extensionTool({ input, ports }) {
   const recipientsRef = trimmedOrNone(input?.recipientsRef);
   if (recipientsRef === undefined) {
@@ -84,13 +102,13 @@ export async function extensionTool({ input, ports }) {
       );
     }
     const address = trimmedOrNone(row.email ?? row.recipientEmail);
-    const contactId = trimmedOrNone(row.contactId);
+    const contactId = contactKeyOf(row);
     if (contactId === undefined && address === undefined) {
       throw new ExtensionToolCallRefusal(
         `Confirmed recipient ${position} of this run names neither a contact nor an address, so no recipient record is filed for this run.`,
       );
     }
-    const key = contactId !== undefined ? `contact:${contactId}` : `email:${address.toLowerCase()}`;
+    const key = contactId !== undefined ? `contact:${contactId}` : `email:${addressKeyOf(address)}`;
     if (filedKeys.has(key)) {
       skipped += 1;
       continue;
