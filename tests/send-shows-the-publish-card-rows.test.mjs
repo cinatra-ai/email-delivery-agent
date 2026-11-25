@@ -7,8 +7,9 @@
 // over one of the step's own inputs. A row holds what a person can judge,
 // never an internal identifier. The send step declares four rows:
 //   - From: the sending mailbox (a text row over senderEmail);
-//   - Recipients: the recipients, one line each with name, email and company
-//     (a list row over recipients);
+//   - Recipients: the recipients, one line each with name, email, company and
+//     the subject of the email that recipient gets (a list row over
+//     recipients);
 //   - Emails: the approved email bodies, the artifact revisions the run made
 //     (an artifacts row over emailBodies);
 //   - Call to action: the call to action of the emails (a text row over
@@ -65,6 +66,7 @@ const EXPECTED_ROWS = [
       { label: "Name", field: "name" },
       { label: "Email", field: "email" },
       { label: "Company", field: "company" },
+      { label: "Subject", field: "subject" },
     ],
   },
   { kind: "artifacts", label: "Emails", input: "emailBodies" },
@@ -205,13 +207,14 @@ test("the card's values are typed for their rows", () => {
   for (const bodies of [inputOf(refs[SEND], "emailBodies"), (refs[READ].outputs ?? []).find((entry) => entry.title === "emailBodies")]) {
     assert.equal(bodies.type, "array");
     // The shape an artifacts row reads, a list of { artifactId, representationRevisionId }, with the contact the
-    // send start joins each body on.
-    assert.deepEqual(bodies.json_schema.items.required, ["artifactId", "representationRevisionId", "contactId"]);
+    // send start joins each body on, and the address and the subject the card shows for that draft, which the send
+    // start compares with the message it mails.
+    assert.deepEqual(bodies.json_schema.items.required, ["artifactId", "representationRevisionId", "contactId", "recipientEmail", "subject"]);
   }
   const recipients = [inputOf(refs[SEND], "recipients"), (refs[READ].outputs ?? []).find((entry) => entry.title === "recipients")];
   for (const entry of recipients) {
     assert.equal(entry.type, "array");
-    assert.deepEqual(Object.keys(entry.json_schema.items.properties).sort(), ["company", "email", "name"]);
+    assert.deepEqual(Object.keys(entry.json_schema.items.properties).sort(), ["company", "email", "name", "subject"]);
   }
   assert.equal(inputOf(refs[SEND], "callToAction").type, "string");
   assert.equal((refs[READ].outputs ?? []).find((entry) => entry.title === "callToAction").type, "string");

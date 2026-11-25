@@ -16,9 +16,16 @@
 //     the override address instead; no port of this module can read that
 //     setting, so the list does not show it;
 //   - the approved body of each of those drafts, as the artifact revision the
-//     run hands in and the contact of its draft (the draft's contactId, else
-//     its recipientId): the value the send step passes to the send start as
-//     approvedBodies, and the value the card's Emails row shows.
+//     run hands in, the contact of its draft (the draft's contactId, else its
+//     recipientId), and the address and the subject of that draft as read here:
+//     the value the send step passes to the send start as approvedBodies, and
+//     the value the card's Emails row shows. The address and the subject are
+//     the ones the card's Recipients row shows for the same draft. The send
+//     start compares each message's address and subject with them and refuses
+//     the whole send before any mail on a difference, so a draft or a list
+//     changed while the card waits mails nothing the person did not see.
+// A mailed draft without a subject is refused before the card
+// (SUBJECT_MISSING): the card would show an email whose subject is unknown.
 // A body is joined to its draft by the contact it names; bodies that name no
 // contact are joined by position, one per draft of the bundle, in draft order.
 // The call is refused before the card when a body cannot be joined to exactly
@@ -106,6 +113,11 @@ function sendAddressOf(draft, rows) {
 
 // The body the send start mails for a draft.
 const sendBodyOf = (draft) => draft.body ?? draft.bodyHtml ?? "";
+
+// The subject of a draft as the bundle holds it, which is the subject the send
+// start mails and compares; a missing or blank one is none.
+const subjectOf = (draft) =>
+  typeof draft.subject === "string" && draft.subject.trim() !== "" ? draft.subject : undefined;
 
 // The confirmed recipient a draft is for, for its name and company only.
 function rowOf(draft, rows, address) {
@@ -295,12 +307,20 @@ export async function extensionTool({ input, ports }) {
         `CALL_TO_ACTION_NOT_IN_EMAIL: Email body ${entry.body.position} of this run does not carry the call to action of the run, so the publish card would show a call to action that the send does not mail.`,
       );
     }
+    const subject = subjectOf(entry.draft);
+    if (subject === undefined) {
+      throw new ExtensionToolCallRefusal(
+        `SUBJECT_MISSING: Approved draft ${entry.position} of this run has an address but no subject, so the publish card cannot show the subject of its email.`,
+      );
+    }
     const row = rowOf(entry.draft, rows, entry.address);
-    recipients.push({ name: nameOf(entry.draft, row), email: entry.address, company: companyOf(row) });
+    recipients.push({ name: nameOf(entry.draft, row), email: entry.address, company: companyOf(row), subject });
     emailBodies.push({
       artifactId: entry.body.artifactId,
       representationRevisionId: entry.body.representationRevisionId,
       contactId: entry.contact,
+      recipientEmail: entry.address,
+      subject,
     });
   }
 

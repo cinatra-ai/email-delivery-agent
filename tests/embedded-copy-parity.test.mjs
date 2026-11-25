@@ -1,51 +1,20 @@
-// Parity of this flow with its embedded copy - cinatra-ai/cinatra#3096 item (7).
+// Parity of this flow with its embedded copy - cinatra-ai/cinatra#3096 item (7)
+// and cinatra-ai/cinatra#3089.
 //
 // The outreach pack (@cinatra-ai/email-outreach-agent) runs this agent as an
 // embedded copy of this flow. The fixture
 // tests/fixtures/email-outreach-delivery-subflow.json is that copy taken whole:
-// the value of "email-delivery-subflow" in the outreach pack's cinatra/oas.json
-// at commit 383410bbc049b030de14e57c5775952893ca83d4.
+// the value of "email-delivery-subflow" that the outreach pack's generator
+// (scripts/embedded-copies.mjs at cinatra-ai/email-outreach-agent 12bb5e2)
+// writes from this flow with the delivery entries of its
+// scripts/embedded-copies.json, as this flow's publishing send needs them.
 //
-// This flow is the source of truth the copy is re-inlined from, so it must
-// carry everything the copy carries. The rule is CONTAINS: with the copy's id
-// prefix "sender-" stripped, every step of the copy is a step of this flow,
-// and each carries every key and every titled entry the copy's step carries,
-// with equal scalar values. Extra keys and extra entries are allowed: this flow
-// keeps its own read-only prepare step, the summary the confirmation shows,
-// its closing sentence after the send and its end with its typed defaults.
-// This flow also files the recipient records and reads what the send mails in front of its send, two steps of its own the copy does not carry yet.
-//
-// The copy still carries the confirmation step this flow had (approval_gate),
-// its edges and its answer (the output userResponse). This flow no longer has
-// them: sending an email is an external write, so the application stops the
-// run in front of the send and shows its publish card, and the flow draws no
-// confirmation of its own (cinatra-ai/cinatra#3745). The copy's confirmation
-// step, every edge that starts or ends at it and the answer output are left
-// out of the comparison until the outreach pack re-embeds this flow; the
-// suite send-follows-the-publish-decision holds that this flow has none.
-//
-// The copy's send is a model step that writes the send start's arguments and
-// returns a result object, sendResult. This flow's send is a model-free call of
-// the send start on the passthrough road (cinatra-ai/cinatra#3089): its
-// arguments are the flow's values, and it hands on the members of the send
-// start's answer (its status, the number sent and the reason of a failure), not
-// a result object. The copy's model-step paths, its sendResult output (on the
-// send, on its end and on the flow) and the data edge that carries it are left
-// out of the comparison until the outreach pack re-embeds this flow; the suite
-// send-follows-the-publish-decision holds the send's call and its outputs.
-//
-// These paths are not compared, and each is held another way:
-// - send.url, send.data.system, send.data.user and send.data.agent_id, the
-//   copy's model step: this flow's send calls the passthrough road and carries
-//   no model text.
-// - send.metadata.cinatra.requiresApproval: the copy says true, this flow keeps
-//   false. The publish card is the one approval in front of the send and the
-//   send step's screen is not a hold (cinatra-ai/cinatra#3094); the arm "6d -
-//   the declared pauses are exactly the pauses the flow has" holds that.
-// - the default of senderEmail (on the flow, its start and its send step): the
-//   copy defaults the sending mailbox to empty, this flow has no default for
-//   it, because the publish card shows it and a run without it must not reach
-//   the card; the suite send-shows-the-publish-card-rows holds that.
+// The rule is EQUALITY: the copy is this flow with the generator's prefix
+// "sender-" on every step id, reference and edge name, and with exactly the
+// differences named in DIFFERENCES below and nothing else. Every step of the
+// flow, the read step and the publishing send included, every input and output
+// and every edge is compared. Each named difference must still apply to this
+// flow, so a difference that no longer has a reason fails here as well.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -55,159 +24,128 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const oas = JSON.parse(readFileSync(join(root, "cinatra", "oas.json"), "utf8"));
-const rawCopy = JSON.parse(
-  readFileSync(join(root, "tests", "fixtures", "email-outreach-delivery-subflow.json"), "utf8"),
-);
+const copy = JSON.parse(readFileSync(join(root, "tests", "fixtures", "email-outreach-delivery-subflow.json"), "utf8"));
 
 const PREFIX = "sender-";
-const unprefix = (text) => (text.startsWith(PREFIX) ? text.slice(PREFIX.length) : text);
+const COPY_ID = "email-delivery-subflow";
+const refOf = (node) => node?.$component_ref;
+const clone = (value) => structuredClone(value);
+const touches = (edge, step) =>
+  [edge.source_node, edge.destination_node, edge.from_node, edge.to_node].some((node) => refOf(node) === step);
 
-/** The copy with the prefix stripped from every string and every key. */
-function strip(value) {
-  if (Array.isArray(value)) return value.map(strip);
-  if (value && typeof value === "object")
-    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [unprefix(key), strip(inner)]));
-  return typeof value === "string" ? unprefix(value) : value;
-}
-
-/** The copy's confirmation step and its answer, which this flow no longer has (see the header). */
-const GONE_STEP = "approval_gate";
-const GONE_OUTPUT = "userResponse";
-/** The copy's send result object and the edge that carries it, which this flow no longer has (see the header). */
-const GONE_RESULT = "sendResult";
-const GONE_RESULT_EDGE = "send.sendResult -> end.sendResult";
-const touchesGoneStep = (edge) => edge.split(" -> ").some((end) => end.split(".")[0].split("[")[0] === GONE_STEP);
-
-const copy = strip(rawCopy);
-const refs = oas.$referenced_components ?? {};
-const copyRefs = copy.$referenced_components ?? {};
-
-/** A list the copy must carry: an absent or empty one would let an arm pass on nothing. */
-function copyList(key) {
-  const list = copy[key];
-  assert.ok(Array.isArray(list) && list.length > 0, `the embedded copy carries no ${key} to compare`);
-  return list;
-}
-
-/** The paths held another way, and the end node's answers that this flow no longer has, as the header says. */
-const SKIPPED = new Set([
-  "send.url",
-  "send.data.system",
-  "send.data.user",
-  "send.data.agent_id",
-  // The copy's result object, which this flow's send no longer returns (see the header).
-  "send.outputs[sendResult]",
-  "end.outputs[sendResult]",
-  "send.metadata.cinatra.requiresApproval",
-  "inputs[senderEmail].default",
-  "start.inputs[senderEmail].default",
-  "send.inputs[senderEmail].default",
-  // The confirmation's answer at the end node, gone with the confirmation (see the header).
-  "end.outputs[userResponse]",
-]);
-
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isTitledList = (list) =>
-  list.length > 0 && list.every((entry) => isObject(entry) && typeof entry.title === "string");
-
-/** Collect, into `missing`, everything `want` carries that `have` does not. */
-function contains(have, want, path, missing) {
-  if (SKIPPED.has(path)) return;
-  if (Array.isArray(want)) {
-    if (!Array.isArray(have)) {
-      missing.push(`${path}: not a list`);
-      return;
-    }
-    if (isTitledList(want)) {
-      for (const entry of want) {
-        if (SKIPPED.has(`${path}[${entry.title}]`)) continue;
-        const found = have.find((candidate) => isObject(candidate) && candidate.title === entry.title);
-        if (!found) missing.push(`${path}[${entry.title}]`);
-        else contains(found, entry, `${path}[${entry.title}]`, missing);
+/**
+ * What may differ between this flow and its embedded copy, and why. Each entry
+ * checks that it still applies to the flow and then makes its change.
+ */
+const DIFFERENCES = [
+  {
+    name: "the flow's description and metadata are left out",
+    why: "They describe this package; the outreach declares the run's screens and package once.",
+    apply(flow) {
+      for (const key of ["description", "metadata"]) {
+        assert.ok(Object.hasOwn(flow, key), `the flow has no ${key}`);
+        delete flow[key];
       }
-      return;
+    },
+  },
+  {
+    name: "the prepare step's model preference is left out",
+    why: "The outreach's steps keep the model preference the outreach gives them.",
+    apply(flow) {
+      const data = flow.$referenced_components.prepare.data;
+      assert.ok(Object.hasOwn(data, "cinatra_llm"), "the prepare step has no model preference");
+      delete data.cinatra_llm;
+    },
+  },
+  {
+    name: "the closing sentence (delivery_summary) is left out and the send goes straight to the end",
+    why: "The outreach ends once, in its own campaign summary after the copy.",
+    apply(flow) {
+      assert.ok(flow.$referenced_components.delivery_summary, "the flow has no closing sentence");
+      delete flow.$referenced_components.delivery_summary;
+      flow.nodes = flow.nodes.filter((node) => refOf(node) !== "delivery_summary");
+      flow.control_flow_connections = flow.control_flow_connections.filter((e) => !touches(e, "delivery_summary"));
+      flow.data_flow_connections = flow.data_flow_connections.filter((e) => !touches(e, "delivery_summary"));
+      assert.ok(!flow.control_flow_connections.some((e) => refOf(e.from_node) === "send" && refOf(e.to_node) === "end"));
+      flow.control_flow_connections.push({
+        component_type: "ControlFlowEdge",
+        name: "send_to_end",
+        from_node: { $component_ref: "send" },
+        to_node: { $component_ref: "end" },
+      });
+    },
+  },
+  {
+    name: "inside the copy the send is not a publishing step: publishes is false and it declares no card rows",
+    why:
+      "Only a top-level node can be a publishing step (the run is stopped in front of it); the outreach's " +
+      "sender_flow node, which runs the copy, publishes, and its decision authorizes the nested send. A nested " +
+      "send with publishes true, or with card rows, refuses the outreach's compile.",
+    apply(flow) {
+      const cinatra = flow.$referenced_components.send.metadata.cinatra;
+      assert.equal(cinatra.publishes, true, "the flow's send does not publish");
+      assert.ok(Array.isArray(cinatra.publishRows), "the flow's send declares no card rows");
+      cinatra.publishes = false;
+      delete cinatra.publishRows;
+    },
+  },
+];
+
+/** The generator's prefix: on every step id and key, every reference, every edge name and a filing step's node_id. */
+function prefixed(flow) {
+  const refs = {};
+  for (const [key, step] of Object.entries(flow.$referenced_components)) {
+    const data = step.data;
+    if (data && typeof data === "object" && data.tool === "artifact_materialize" && data.input?.node_id === step.id) {
+      data.input.node_id = PREFIX + step.id;
     }
-    want.forEach((entry, index) => {
-      if (index >= have.length) missing.push(`${path}[${index}]`);
-      else contains(have[index], entry, `${path}[${index}]`, missing);
-    });
-    return;
+    if (step.name === step.id) step.name = PREFIX + step.id;
+    step.id = PREFIX + step.id;
+    refs[PREFIX + key] = step;
   }
-  if (isObject(want)) {
-    if (!isObject(have)) {
-      missing.push(`${path}: not an object`);
-      return;
-    }
-    for (const [key, inner] of Object.entries(want)) {
-      if (SKIPPED.has(`${path}.${key}`)) continue;
-      if (!Object.hasOwn(have, key)) missing.push(`${path}.${key}`);
-      else contains(have[key], inner, `${path}.${key}`, missing);
-    }
-    return;
-  }
-  if (have !== want) missing.push(`${path}: ${JSON.stringify(want)}, found ${JSON.stringify(have)}`);
+  flow.$referenced_components = refs;
+  const walk = (value) => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (value === null || typeof value !== "object") return;
+    if (typeof value.$component_ref === "string") value.$component_ref = PREFIX + value.$component_ref;
+    Object.values(value).forEach(walk);
+  };
+  walk(flow);
+  for (const edge of [...flow.control_flow_connections, ...flow.data_flow_connections]) edge.name = PREFIX + edge.name;
+  return flow;
 }
 
-const dataEdgesOf = (flow) =>
-  new Set(
-    (flow.data_flow_connections ?? []).map(
-      (e) =>
-        `${e.source_node.$component_ref}.${e.source_output} -> ${e.destination_node.$component_ref}.${e.destination_input}`,
-    ),
-  );
-const controlEdgesOf = (flow) =>
-  new Set(
-    (flow.control_flow_connections ?? []).map(
-      (e) =>
-        `${e.from_node.$component_ref}${e.from_branch ? `[${e.from_branch}]` : ""} -> ${e.to_node.$component_ref}`,
-    ),
-  );
+function expectedCopy() {
+  const flow = clone(oas);
+  for (const difference of DIFFERENCES) difference.apply(flow);
+  const out = prefixed(flow);
+  out.id = COPY_ID;
+  return out;
+}
 
-test("(7) every step of the embedded copy is a step of this flow, carrying all it carries", () => {
-  const listed = new Set((oas.nodes ?? []).map((n) => n.$component_ref));
-  const missing = [];
-  for (const { $component_ref: id } of copyList("nodes")) {
-    if (id === GONE_STEP) continue;
-    if (!listed.has(id)) missing.push(`${id}: not a step of this flow`);
-    if (!refs[id]) {
-      missing.push(`${id}: not defined in this flow`);
-      continue;
-    }
-    contains(refs[id], copyRefs[id], id, missing);
+test("(7) the embedded copy is this flow, prefixed, with exactly the named differences", () => {
+  assert.deepStrictEqual(copy, expectedCopy());
+});
+
+test("(7) the copy carries the read step and the publishing send's call unchanged", () => {
+  const steps = copy.$referenced_components;
+  for (const step of ["resolve_send", "send", "file_recipients", "prepare", "start", "end"]) {
+    assert.ok(steps[PREFIX + step], `the copy has no step ${step}`);
   }
-  assert.deepEqual(missing, [], "this flow lacks what the embedded copy carries: " + missing.join("; "));
+  assert.deepStrictEqual(steps[`${PREFIX}send`].data, oas.$referenced_components.send.data);
+  assert.deepStrictEqual(steps[`${PREFIX}send`].inputs, oas.$referenced_components.send.inputs);
+  assert.deepStrictEqual(steps[`${PREFIX}send`].outputs, oas.$referenced_components.send.outputs);
+  assert.deepStrictEqual(steps[`${PREFIX}resolve_send`].data, oas.$referenced_components.resolve_send.data);
+  assert.deepStrictEqual(copy.inputs, oas.inputs);
+  assert.deepStrictEqual(copy.outputs, oas.outputs);
+  // The copy's send keeps the send start's confirmation and its risk class; only the card is the outreach's.
+  const cinatra = steps[`${PREFIX}send`].metadata.cinatra;
+  assert.deepStrictEqual(cinatra.confirmations, oas.$referenced_components.send.metadata.cinatra.confirmations);
+  assert.equal(cinatra.riskClass, "email_send");
+  assert.equal(cinatra.requiresApproval, false);
 });
 
-test("(7) the flow takes every input and hands on every output the copy does", () => {
-  const missing = [];
-  contains(oas.inputs ?? [], copyList("inputs"), "inputs", missing);
-  contains(oas.outputs ?? [], copyList("outputs").filter((o) => o.title !== GONE_OUTPUT && o.title !== GONE_RESULT), "outputs", missing);
-  assert.deepEqual(missing, [], "this flow lacks the copy's inputs or outputs: " + missing.join("; "));
-});
-
-test("(7) every data edge of the copy is a data edge of this flow", () => {
-  copyList("data_flow_connections");
-  const have = dataEdgesOf(oas);
-  const missing = [...dataEdgesOf(copy)]
-    .filter((edge) => !touchesGoneStep(edge))
-    .filter((edge) => edge !== GONE_RESULT_EDGE)
-    .filter((edge) => !have.has(edge));
-  assert.deepEqual(missing, [], "this flow lacks the copy's data edges: " + missing.join("; "));
-});
-
-test("(7) every control edge of the copy is one of this flow, but the confirmation step's and the closing sentence after the send", () => {
-  copyList("control_flow_connections");
-  const have = controlEdgesOf(oas);
-  // The copy's start goes to its confirmation step, which this flow no longer
-  // has; this flow's start goes to its read-only prepare step and then to the
-  // filing step and the read step in front of the send. The copy's send goes straight to its end;
-  // this flow's send goes on to its closing sentence and then to its end.
-  const missing = [...controlEdgesOf(copy)]
-    .filter((edge) => !touchesGoneStep(edge))
-    .filter((edge) => edge !== "send -> end")
-    .filter((edge) => !have.has(edge));
-  for (const edge of ["start -> prepare", "prepare -> file_recipients", "file_recipients -> resolve_send", "resolve_send -> send", "send -> delivery_summary", "delivery_summary -> end"]) {
-    if (!have.has(edge)) missing.push(edge);
-  }
-  assert.deepEqual(missing, [], "this flow lacks the copy's control edges: " + missing.join("; "));
+test("(7) the named differences are the whole list, each with a reason", () => {
+  assert.equal(DIFFERENCES.length, 4);
+  for (const difference of DIFFERENCES) assert.ok(difference.why.trim().length > 0, difference.name);
 });

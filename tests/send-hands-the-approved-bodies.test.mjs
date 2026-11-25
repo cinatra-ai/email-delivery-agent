@@ -2,8 +2,10 @@
 // cinatra-ai/cinatra#3089.
 //
 // The send start takes `approvedBodies`: one `{ artifactId,
-// representationRevisionId, contactId }` per mailed draft, where `contactId`
-// is the draft's `contactId`, else its `recipientId` (cinatra
+// representationRevisionId, contactId, recipientEmail, subject }` per mailed
+// draft, where `contactId` is the draft's `contactId`, else its `recipientId`,
+// and `recipientEmail` and `subject` are the address and the subject the card
+// showed for that draft (cinatra
 // src/lib/trigger-email-send-use-cases.ts, runInitialSend, the approved form;
 // packages/trigger-email-send/src/mcp/schemas.ts). It mails the text of each
 // draft's approved revision and refuses the whole send when a mailed draft has
@@ -92,8 +94,8 @@ async function refusal(promise, pattern) {
 }
 
 const EXPECTED_BODIES = [
-  { artifactId: "a-1", representationRevisionId: "r-1", contactId: "c-1" },
-  { artifactId: "a-2", representationRevisionId: "r-2", contactId: "c-2" },
+  { artifactId: "a-1", representationRevisionId: "r-1", contactId: "c-1", recipientEmail: "ada@example.com", subject: "One" },
+  { artifactId: "a-2", representationRevisionId: "r-2", contactId: "c-2", recipientEmail: "ben@example.com", subject: "Two" },
 ];
 
 test("each mailed draft gets one body entry with its draft's contact; the draft without an address gets none and shifts nothing", async () => {
@@ -212,12 +214,12 @@ test("a run whose list of bodies would be empty ends at the read step, so the se
   assert.equal(Object.hasOwn(inputOf(refs.send, "emailBodies"), "default"), false, "the send step can start without the read step's list");
 });
 
-test("the read step's bodies and the send's bodies carry the contact the send start joins on", () => {
+test("the read step's bodies and the send's bodies carry the contact the send start joins on, and the address and subject it compares", () => {
   const output = (refs.resolve_send.outputs ?? []).find((entry) => entry.title === "emailBodies");
   const input = inputOf(refs.send, "emailBodies");
   for (const entry of [output, input]) {
-    assert.deepEqual(entry.json_schema.items.required, ["artifactId", "representationRevisionId", "contactId"]);
-    assert.deepEqual(Object.keys(entry.json_schema.items.properties), ["artifactId", "representationRevisionId", "contactId"]);
+    assert.deepEqual(entry.json_schema.items.required, ["artifactId", "representationRevisionId", "contactId", "recipientEmail", "subject"]);
+    assert.deepEqual(Object.keys(entry.json_schema.items.properties), ["artifactId", "representationRevisionId", "contactId", "recipientEmail", "subject"]);
     assert.equal(entry.json_schema.maxItems, 50);
   }
   // The bodies the run hands in may name their contact.

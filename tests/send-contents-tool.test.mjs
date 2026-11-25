@@ -16,6 +16,14 @@
 // address with the configured override address (and empties cc and bcc); no
 // port of this module can read that setting, so the copy below models the send
 // start only, up to the address it hands on.
+//
+// The card's values are bound to the send. Each approved body the step hands
+// on carries the address and the subject of its draft as the step read them,
+// the same address and subject the card's Recipients row shows for that draft.
+// The send start compares, for each message, the address it resolves (trimmed,
+// without regard to case) and the subject it mails with that entry, and
+// refuses the whole send before any mail on a difference. The copy below
+// models that comparison too.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -94,7 +102,7 @@ function ports({ objects = { [LIST_REF]: LIST, [BUNDLE_REF]: BUNDLE }, texts = T
 const call = (input, p = ports()) => extensionTool({ input, ports: p });
 const fullInput = (emailBodies = JSON.stringify(BODIES), callToAction = CALL_TO_ACTION) => ({ recipientsRef: LIST_REF, draftBundleRef: BUNDLE_REF, emailBodies, callToAction });
 
-/** A copy of the send start's reading: the address it hands on for each draft, with which body (before any override of the pipeline). */
+/** A copy of the send start's reading: the address it hands on for each draft, with which subject and body (before any override of the pipeline). */
 function sendMails(bundle, list) {
   const recipients = list.data.confirmedRecipients ?? list.data.recipients ?? [];
   const drafts = bundle.data.drafts ?? bundle.data.confirmedRecipients ?? [];
@@ -108,9 +116,26 @@ function sendMails(bundle, list) {
       to = match?.email || match?.recipientEmail || null;
     }
     if (!to) continue;
-    mails.push({ to, body: draft.body ?? draft.bodyHtml ?? "" });
+    const contact = (draft.contactId ?? draft.recipientId ?? "").trim();
+    mails.push({ to, contact, subject: draft.subject, body: draft.body ?? draft.bodyHtml ?? "" });
   }
   return mails;
+}
+
+/**
+ * A copy of the send start's comparison of the approved bodies with what it mails: each message's approved entry,
+ * joined by the contact, must name the address the send resolves (trimmed, without regard to case) and the subject
+ * it mails. One difference refuses the whole send, before any mail. Returns the refusal, or null when the send goes.
+ */
+function sendRefusal(mails, approvedBodies) {
+  const norm = (value) => String(value ?? "").trim().toLowerCase();
+  for (const mail of mails) {
+    const entry = approvedBodies.find((body) => body.contactId === mail.contact);
+    if (!entry) return `no approved body for contact ${mail.contact}`;
+    if (norm(entry.recipientEmail) !== norm(mail.to)) return `the address of contact ${mail.contact} differs`;
+    if (entry.subject !== mail.subject) return `the subject of contact ${mail.contact} differs`;
+  }
+  return null;
 }
 
 async function refusal(promise) {
@@ -136,12 +161,12 @@ test("the card's recipients and bodies are exactly the drafts the send mails, fr
   assert.deepEqual(p.reads.sort(), [BUNDLE_REF, LIST_REF].sort(), "the step reads the two references the send start reads");
   assert.deepEqual(answer, {
     recipients: [
-      { name: "Ada Lovelace", email: "ada@example.com", company: "Example One" },
-      { name: "Ben Hill", email: "ben@example.com", company: "Example Two" },
+      { name: "Ada Lovelace", email: "ada@example.com", company: "Example One", subject: "One" },
+      { name: "Ben Hill", email: "ben@example.com", company: "Example Two", subject: "Two" },
     ],
     emailBodies: [
-      { ...BODIES[0], contactId: "c-1" },
-      { ...BODIES[1], contactId: "c-2" },
+      { ...BODIES[0], contactId: "c-1", recipientEmail: "ada@example.com", subject: "One" },
+      { ...BODIES[1], contactId: "c-2", recipientEmail: "ben@example.com", subject: "Two" },
     ],
     callToAction: CALL_TO_ACTION,
   });
@@ -149,6 +174,69 @@ test("the card's recipients and bodies are exactly the drafts the send mails, fr
   assert.deepEqual(answer.recipients.map((r) => r.email), mails.map((m) => m.to), "the card lists the addresses the send start addresses, from the bundle and the list");
   const shown = answer.emailBodies.map((b) => TEXTS[b.artifactId].replace(/\s+$/, ""));
   assert.deepEqual(shown, mails.map((m) => m.body.replace(/\s+$/, "")), "the card shows the bodies the send mails");
+  assert.deepEqual(answer.recipients.map((r) => r.subject), mails.map((m) => m.subject), "the card shows the subjects the send mails");
+  assert.equal(sendRefusal(mails, answer.emailBodies), null, "the send refuses the bodies the card showed");
+});
+
+// ---- the address and the subject of each email ----
+
+test("each approved body carries the address and the subject that the card's Recipients row shows for the same draft", async () => {
+  const answer = await call(fullInput());
+  assert.equal(answer.emailBodies.length, answer.recipients.length);
+  answer.emailBodies.forEach((body, index) => {
+    const line = answer.recipients[index];
+    assert.equal(body.recipientEmail, line.email, `body ${index + 1}: the address differs from the card's line`);
+    assert.equal(body.subject, line.subject, `body ${index + 1}: the subject differs from the card's line`);
+    assert.deepEqual(Object.keys(body).sort(), ["artifactId", "contactId", "recipientEmail", "representationRevisionId", "subject"]);
+  });
+});
+
+test("the address a draft takes from the recipient list is the one its approved body carries", async () => {
+  // Ben's draft has no address of its own; the send takes the list's address for his contact.
+  const answer = await call(fullInput());
+  assert.equal(answer.emailBodies[1].recipientEmail, "ben@example.com");
+  assert.equal(answer.recipients[1].email, "ben@example.com");
+});
+
+test("an address or a subject that changes after the card was shown refuses the send in the model of the send start", async () => {
+  const answer = await call(fullInput());
+  // The same address in another case and with outer space is the same address.
+  const recased = structuredClone(BUNDLE);
+  recased.data.drafts[0].recipientEmail = "  ADA@example.com ";
+  assert.equal(sendRefusal(sendMails(recased, LIST), answer.emailBodies), null);
+  const readdressed = structuredClone(LIST);
+  readdressed.data.confirmedRecipients[1].email = "someone-else@example.com";
+  assert.match(sendRefusal(sendMails(BUNDLE, readdressed), answer.emailBodies), /address of contact c-2/);
+  const resubjected = structuredClone(BUNDLE);
+  resubjected.data.drafts[0].subject = "One, changed";
+  assert.match(sendRefusal(sendMails(resubjected, LIST), answer.emailBodies), /subject of contact c-1/);
+});
+
+test("a mailed draft whose subject is missing or blank is refused before the card", async () => {
+  for (const subject of [undefined, "", "   ", 7]) {
+    const bundle = structuredClone(BUNDLE);
+    if (subject === undefined) delete bundle.data.drafts[1].subject;
+    else bundle.data.drafts[1].subject = subject;
+    const message = await refusal(call(fullInput(), ports({ objects: { [LIST_REF]: LIST, [BUNDLE_REF]: bundle } })));
+    assert.match(message, /^SUBJECT_MISSING: /);
+    assert.match(message, /draft 2 /);
+  }
+});
+
+test("a draft the send does not mail needs no subject", async () => {
+  const bundle = structuredClone(BUNDLE);
+  delete bundle.data.drafts[2].subject;
+  const answer = await call(fullInput(), ports({ objects: { [LIST_REF]: LIST, [BUNDLE_REF]: bundle } }));
+  assert.equal(answer.emailBodies.length, 2);
+});
+
+test("the subject is handed on as the draft holds it, which is the subject the send mails", async () => {
+  const bundle = structuredClone(BUNDLE);
+  bundle.data.drafts[0].subject = "  One  ";
+  const answer = await call(fullInput(), ports({ objects: { [LIST_REF]: LIST, [BUNDLE_REF]: bundle } }));
+  assert.equal(answer.emailBodies[0].subject, "  One  ");
+  assert.equal(answer.recipients[0].subject, "  One  ");
+  assert.equal(sendRefusal(sendMails(bundle, LIST), answer.emailBodies), null);
 });
 
 test("a list already parsed is taken as it is", async () => {
