@@ -43,9 +43,11 @@
     {
       "title": "emailBodies",
       "type": "array",
-      "description": "The approved email bodies: the artifact revision of each draft's approved body. Each one names the contact of its draft (the draft's contactId, else its recipientId), or, when none names a contact, they are one for each draft of the approved draft bundle, in draft order. The read step joins each one to its draft, compares it with the body of that draft and refuses a body it cannot join to exactly one draft; the publish card shows those of the drafts the send mails, and the send mails their text.",
+      "description": "The approved email bodies: the artifact revision of each draft's approved body. Each one names the contact of its draft (the draft's contactId, else its recipientId), or, when none names a contact, they are one for each draft of the approved draft bundle, in draft order. The read step joins each one to its draft, compares it with the body of that draft and refuses a body it cannot join to exactly one draft; the publish card shows those of the drafts the send mails, and the send mails their text. At most 50 bodies, one for each draft of a bundle of at most 50 drafts.",
       "json_schema": {
         "type": "array",
+        "maxItems": 50,
+        "minItems": 1,
         "items": {
           "type": "object",
           "properties": {
@@ -507,9 +509,11 @@
         {
           "title": "emailBodies",
           "type": "array",
-          "description": "The approved email bodies: the artifact revision of each draft's approved body. Each one names the contact of its draft (the draft's contactId, else its recipientId), or, when none names a contact, they are one for each draft of the approved draft bundle, in draft order. The read step joins each one to its draft, compares it with the body of that draft and refuses a body it cannot join to exactly one draft; the publish card shows those of the drafts the send mails, and the send mails their text.",
+          "description": "The approved email bodies: the artifact revision of each draft's approved body. Each one names the contact of its draft (the draft's contactId, else its recipientId), or, when none names a contact, they are one for each draft of the approved draft bundle, in draft order. The read step joins each one to its draft, compares it with the body of that draft and refuses a body it cannot join to exactly one draft; the publish card shows those of the drafts the send mails, and the send mails their text. At most 50 bodies, one for each draft of a bundle of at most 50 drafts.",
           "json_schema": {
             "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
@@ -712,6 +716,8 @@
           "type": "array",
           "json_schema": {
             "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
@@ -744,6 +750,8 @@
           "description": "One line per draft the send mails: the name, the address the send start addresses it to, the company and the subject of the draft. When the workspace's development-mode recipient override is on, the email pipeline mails the override address instead; this list does not show it.",
           "json_schema": {
             "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
@@ -770,6 +778,7 @@
           "json_schema": {
             "type": "array",
             "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
@@ -811,7 +820,7 @@
           "requiresApproval": false,
           "packageName": "@cinatra-ai/email-delivery-agent",
           "publishes": false,
-          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact and the address and subject of that draft, the same ones the Recipients line of that draft shows). The send step takes the recipients and the bodies from this step only and passes the bodies to the send start as approvedBodies, so the publish card shows what the send mails. It also hands on the call to action the card's Call to action row shows, and only one that the text of every mailed body carries, so the card never shows a call to action the send does not mail. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body, a contact or a subject (SUBJECT_MISSING), one contact or one artifact named twice, more than 50 mailed drafts, a bundle with nothing to mail, a run without a call to action (CALL_TO_ACTION_MISSING) or a mailed body without it (CALL_TO_ACTION_NOT_IN_EMAIL) ends the run before the card. This step writes nothing."
+          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact and the address and subject of that draft, the same ones the Recipients line of that draft shows). The send step takes the recipients and the bodies from this step only and passes the bodies to the send start as approvedBodies, so the publish card shows what the send mails. It also hands on the call to action the card's Call to action row shows, and only one that the text of every mailed body carries, so the card never shows a call to action the send does not mail. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body, a contact or a subject (SUBJECT_MISSING), one contact or one artifact named twice, more than 50 bodies, drafts or confirmed recipients (TOO_MANY_BODIES, TOO_MANY_DRAFTS, TOO_MANY_RECIPIENTS, counted before anything is read), a bundle with nothing to mail, a run without a call to action (CALL_TO_ACTION_MISSING) or a mailed body without it (CALL_TO_ACTION_NOT_IN_EMAIL) ends the run before the card. This step reads the body of each mailed draft and no other body, and writes nothing."
         }
       }
     },
@@ -869,6 +878,8 @@
           "description": "The recipients the send mails, as the read step resolved them from the approved draft bundle and the confirmed recipient list: one line per mailed draft with its name, email, company and the subject of its email. These are the addresses the send start addresses; when the workspace's development-mode recipient override is on, the email pipeline mails the override address instead, which the card's Recipients row does not show",
           "json_schema": {
             "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {
@@ -895,6 +906,7 @@
           "json_schema": {
             "type": "array",
             "maxItems": 50,
+            "minItems": 1,
             "items": {
               "type": "object",
               "properties": {

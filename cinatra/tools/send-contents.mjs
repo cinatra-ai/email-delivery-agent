@@ -33,6 +33,16 @@
 // one contact or one artifact occurs twice, when a body is of another type, cut
 // or not the body of its draft, or when the send would mail more than 50
 // drafts. So the card never shows an email that the send would not mail.
+// Everything the step is handed is counted before anything is read: the
+// bodies, the drafts of the bundle and the rows of the recipient list are each
+// refused above a named limit (TOO_MANY_BODIES, TOO_MANY_DRAFTS,
+// TOO_MANY_RECIPIENTS, and TOO_MANY_MAILED_DRAFTS for the drafts the send
+// mails). The checks that need no content come next: the shape of every body,
+// its place among the drafts, and what each mailed draft needs (an address, a
+// contact, a body, a subject). Only then are artifacts read, one for each body
+// of a MAILED draft, each read bounded to MAX_BODY_BYTES. A body handed in for
+// a draft the send does not mail is not read: it is not sent, so only its shape
+// and its place in the join are checked.
 // The step also hands on the call to action the card's "Call to action" row
 // shows, and only one that every mailed body carries in its text (compared as
 // a body is compared with its draft: trailing white space is not part of it).
@@ -52,6 +62,19 @@ const EMAIL_BODY_TYPE = "@cinatra-ai/email:body";
 // The send start takes at most 50 approved bodies, the cap of the publish
 // card's artifacts row, so every body the card shows fits one send.
 const MAX_MAILED_DRAFTS = 50;
+// The most drafts a bundle may hold, the most bodies a run may hand in and the
+// most rows a confirmed recipient list may hold. The drafting step files at most
+// 50 drafts for one run, one body for each, for the recipients of that run, so a
+// bundle, its bodies and its list never legitimately hold more; a bundle may
+// hold drafts without an address, which are not mailed, and these count here
+// as well. The limits are checked before any artifact is read.
+const MAX_BUNDLE_DRAFTS = 50;
+const MAX_BODIES = 50;
+const MAX_RECIPIENT_ROWS = 50;
+// The most bytes of one body a read takes: the cap the artifacts port itself
+// applies to any text read. A body that does not fit comes back cut off and is
+// refused.
+const MAX_BODY_BYTES = 256 * 1024;
 
 class ExtensionToolCallRefusal extends Error {
   constructor(message) {
@@ -148,6 +171,14 @@ const companyOf = (row) => (row ? textOrEmpty(row.company) || textOrEmpty(row.co
 const withoutTrailingSpace = (text) => text.replace(/\s+$/, "");
 const sameText = (a, b) => withoutTrailingSpace(a) === withoutTrailingSpace(b);
 
+function assertWithinLimit(code, what, count, limit) {
+  if (count > limit) {
+    throw new ExtensionToolCallRefusal(
+      `${code}: The run hands in ${count} ${what}; one send takes at most ${limit}.`,
+    );
+  }
+}
+
 export async function extensionTool({ input, ports }) {
   const recipientsRef = trimmedOrNone(input?.recipientsRef);
   const draftBundleRef = trimmedOrNone(input?.draftBundleRef);
@@ -164,6 +195,15 @@ export async function extensionTool({ input, ports }) {
     );
   }
 
+  // Counted before anything is read: the bodies are the input of the step.
+  const bodies = parseList(input?.emailBodies);
+  if (bodies === undefined || bodies.length === 0) {
+    throw new ExtensionToolCallRefusal(
+      "The run hands in no email bodies; it must hand in the approved body of each draft it mails.",
+    );
+  }
+  assertWithinLimit("TOO_MANY_BODIES", "email bodies", bodies.length, MAX_BODIES);
+
   const list = await ports.objects.read({ objectId: recipientsRef });
   if (!list || list.type !== RECIPIENTS_LIST_TYPE || !isPlainObject(list.data)) {
     throw new ExtensionToolCallRefusal("The confirmed recipient list of this run is not a recipient list.");
@@ -174,17 +214,12 @@ export async function extensionTool({ input, ports }) {
   }
 
   const rows = recipientRowsOf(list.data);
+  assertWithinLimit("TOO_MANY_RECIPIENTS", "confirmed recipients", rows.length, MAX_RECIPIENT_ROWS);
   const drafts = draftsOf(bundle.data);
   if (drafts.length === 0) {
     throw new ExtensionToolCallRefusal("The approved draft bundle of this run holds no draft, so there is nothing to send.");
   }
-
-  const bodies = parseList(input?.emailBodies);
-  if (bodies === undefined || bodies.length === 0) {
-    throw new ExtensionToolCallRefusal(
-      `The run hands in no email bodies for ${drafts.length} approved drafts; it must hand in the approved body of each draft it mails.`,
-    );
-  }
+  assertWithinLimit("TOO_MANY_DRAFTS", "approved drafts", drafts.length, MAX_BUNDLE_DRAFTS);
 
   // The bodies the run hands in, each naming one artifact revision, at most once.
   const handed = [];
@@ -262,14 +297,53 @@ export async function extensionTool({ input, ports }) {
     }
   }
 
-  // Every body handed in is the body of its draft, which is the body the send
-  // start mails. The text of each body is kept for the call-to-action check.
-  const textByArtifact = new Map();
+  // The drafts the send mails: each one has an address, a contact, a body and a
+  // subject. All of this is settled before any artifact is read.
+  const mailed = [];
   for (const entry of entries) {
-    const body = entry.body;
-    if (body === undefined) continue;
-    const { position, artifactId, representationRevisionId } = body;
-    const read = await ports.artifacts.contentRead({ artifactId, representationRevisionId, objectType: EMAIL_BODY_TYPE });
+    if (!entry.address) continue; // The send mails no draft without an address.
+    if (entry.contact === undefined) {
+      throw new ExtensionToolCallRefusal(
+        `Approved draft ${entry.position} of this run has an address but names no contact, so the send cannot join its approved body to it.`,
+      );
+    }
+    if (entry.body === undefined) {
+      throw new ExtensionToolCallRefusal(
+        `Approved draft ${entry.position} of this run has an address but no approved body.`,
+      );
+    }
+    const subject = subjectOf(entry.draft);
+    if (subject === undefined) {
+      throw new ExtensionToolCallRefusal(
+        `SUBJECT_MISSING: Approved draft ${entry.position} of this run has an address but no subject, so the publish card cannot show the subject of its email.`,
+      );
+    }
+    mailed.push({ ...entry, subject });
+  }
+  if (mailed.length === 0) {
+    throw new ExtensionToolCallRefusal("No approved draft of this run has an address, so the send would mail nothing.");
+  }
+  // The bundle limit already keeps this below the send's own limit; the check
+  // stays so the two limits cannot drift apart unnoticed.
+  if (mailed.length > MAX_MAILED_DRAFTS) {
+    throw new ExtensionToolCallRefusal(
+      `TOO_MANY_MAILED_DRAFTS: The run would mail ${mailed.length} approved drafts; one send takes the approved bodies of at most ${MAX_MAILED_DRAFTS}.`,
+    );
+  }
+
+  // Only now are artifacts read: the body of each mailed draft, and no other.
+  // It is the body of its draft, which is the body the send mails. A body
+  // handed in for a draft that is not mailed is not read. Each read is bounded.
+  const recipients = [];
+  const emailBodies = [];
+  for (const entry of mailed) {
+    const { position, artifactId, representationRevisionId } = entry.body;
+    const read = await ports.artifacts.contentRead({
+      artifactId,
+      representationRevisionId,
+      objectType: EMAIL_BODY_TYPE,
+      maxBytes: MAX_BODY_BYTES,
+    });
     if (!read || read.objectType !== EMAIL_BODY_TYPE || typeof read.text !== "string") {
       throw new ExtensionToolCallRefusal(`Email body ${position} of this run is not an email body.`);
     }
@@ -284,53 +358,20 @@ export async function extensionTool({ input, ports }) {
         `Email body ${position} of this run is not the body of approved draft ${entry.position}, which is the body the send mails.`,
       );
     }
-    textByArtifact.set(artifactId, read.text);
-  }
-
-  // The drafts the send mails: each one has an address, a contact and a body.
-  const recipients = [];
-  const emailBodies = [];
-  for (const entry of entries) {
-    if (!entry.address) continue; // The send mails no draft without an address.
-    if (entry.contact === undefined) {
+    if (!withoutTrailingSpace(read.text).includes(callToAction)) {
       throw new ExtensionToolCallRefusal(
-        `Approved draft ${entry.position} of this run has an address but names no contact, so the send cannot join its approved body to it.`,
-      );
-    }
-    if (entry.body === undefined) {
-      throw new ExtensionToolCallRefusal(
-        `Approved draft ${entry.position} of this run has an address but no approved body.`,
-      );
-    }
-    if (!withoutTrailingSpace(textByArtifact.get(entry.body.artifactId)).includes(callToAction)) {
-      throw new ExtensionToolCallRefusal(
-        `CALL_TO_ACTION_NOT_IN_EMAIL: Email body ${entry.body.position} of this run does not carry the call to action of the run, so the publish card would show a call to action that the send does not mail.`,
-      );
-    }
-    const subject = subjectOf(entry.draft);
-    if (subject === undefined) {
-      throw new ExtensionToolCallRefusal(
-        `SUBJECT_MISSING: Approved draft ${entry.position} of this run has an address but no subject, so the publish card cannot show the subject of its email.`,
+        `CALL_TO_ACTION_NOT_IN_EMAIL: Email body ${position} of this run does not carry the call to action of the run, so the publish card would show a call to action that the send does not mail.`,
       );
     }
     const row = rowOf(entry.draft, rows, entry.address);
-    recipients.push({ name: nameOf(entry.draft, row), email: entry.address, company: companyOf(row), subject });
+    recipients.push({ name: nameOf(entry.draft, row), email: entry.address, company: companyOf(row), subject: entry.subject });
     emailBodies.push({
-      artifactId: entry.body.artifactId,
-      representationRevisionId: entry.body.representationRevisionId,
+      artifactId,
+      representationRevisionId,
       contactId: entry.contact,
       recipientEmail: entry.address,
-      subject,
+      subject: entry.subject,
     });
-  }
-
-  if (recipients.length === 0) {
-    throw new ExtensionToolCallRefusal("No approved draft of this run has an address, so the send would mail nothing.");
-  }
-  if (recipients.length > MAX_MAILED_DRAFTS) {
-    throw new ExtensionToolCallRefusal(
-      `The run would mail ${recipients.length} approved drafts; one send takes the approved bodies of at most ${MAX_MAILED_DRAFTS}.`,
-    );
   }
 
   return { recipients, emailBodies, callToAction };
