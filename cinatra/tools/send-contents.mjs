@@ -22,12 +22,14 @@
 //   - the approved body of each of those drafts, as the artifact revision the
 //     run hands in, the contact of its draft (the draft's contactId, else its
 //     recipientId), and the address and the subject of that draft as read here:
-//     the value the send step passes to the send start as approvedBodies, and
-//     the value the card's Emails row shows. The contact of a draft is its
+//     the value the card's Emails row shows, and the one list of exactly these
+//     five members that the send step surfaces in the publish decision, in the
+//     order of the Recipients row; the send start reads what it mails from that
+//     released decision, the request carries no list. The contact of a draft is its
 //     contactId, else its recipientId, each trimmed first, a blank one counting
 //     as absent; one rule serves the draft, the list row and the filing step. The address and the subject are
 //     the ones the card's Recipients row shows for the same draft. The send
-//     start compares each message's address and subject with them and refuses
+//     start compares each message's contact, address and subject with them and refuses
 //     the whole send before any mail on a difference, so a draft or a list
 //     changed while the card waits mails nothing the person did not see.
 // A mailed draft without a subject is refused before the card

@@ -5,7 +5,7 @@ The final send step of an outreach campaign. Connect your Gmail account in works
 ## Works with
 
 - Gmail — connect via the Gmail integration in workspace settings (OAuth; the sender address must be a mailbox the connected account is authorised to send from)
-- A Cinatra host that serves `email_outreach_send_initial_start` to a publishing step on its passthrough road and takes `approvedBodies` as JSON text; on an older host the send call is refused, the run ends and no email is sent
+- A Cinatra host that serves `email_outreach_send_initial_start` to a publishing step on its passthrough road and reads the approved list from the released decision; on an older host the send call is refused, the run ends and no email is sent
 
 ## Capabilities
 

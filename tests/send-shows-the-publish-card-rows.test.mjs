@@ -48,12 +48,11 @@ const PREVIEW_TOOL = "email_outreach_send_initial_preview";
 const SEND = "send";
 const READ = "resolve_send";
 const READ_TOOL = "send_contents";
-// The send start's arguments; approvedBodies is the list the Emails row shows, rendered from the send step's emailBodies.
-const ARGUMENTS = ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"];
-const ARGUMENT_SOURCE = { approvedBodies: "emailBodies | tojson" };
+// The send start's arguments. The list the Emails row shows is no argument: the host reads it from the released decision.
+const ARGUMENTS = ["approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"];
 const ROW_INPUTS = ["senderEmail", "recipients", "emailBodies", "callToAction"];
-// The card's own inputs, which only the card reads (senderEmail and emailBodies are also arguments of the send).
-const CARD_INPUTS = ["recipients", "callToAction"];
+// The card's own inputs, which only the card and the decision read (senderEmail is also an argument of the send).
+const CARD_INPUTS = ["recipients", "callToAction", "emailBodies"];
 
 const EXPECTED_ROWS = [
   { label: "From", input: "senderEmail" },
@@ -110,7 +109,8 @@ test("every row is a value the model-free send step takes from the start node or
   for (const input of shown) assert.equal(sourceOf(SEND, input), ROW_SOURCES[input], `the ${input} row`);
   const rendered = (value) => value.replace(/^\{#[\s\S]*?#\}/, "");
   assert.equal(rendered(send.data.input.senderEmail), "{{ senderEmail }}", "the send does not mail from the mailbox the From row shows");
-  assert.equal(rendered(send.data.input.approvedBodies), "{{ emailBodies | tojson }}", "the send does not mail the bodies the Emails row shows");
+  assert.equal(Object.hasOwn(send.data.input, "approvedBodies"), false, "the send call passes a list of its own");
+  assert.equal(rendered(send.data.input.campaignId), "{{ campaignId }}");
 });
 
 test("every row is in the form the host's compiler reads", () => {
@@ -238,11 +238,10 @@ test("no step takes or hands on a content digest: the send start mails the appro
   }
 });
 
-test("the send step's call passes the five arguments and no other key, and the texts name the publish card as the one place the person decides", () => {
+test("the send step's call passes the four arguments and no other key, and the texts name the publish card as the one place the person decides", () => {
   assert.deepEqual(Object.keys(refs[SEND].data.input).sort(), ARGUMENTS);
   for (const name of ARGUMENTS) {
-    const source = ARGUMENT_SOURCE[name] ?? name;
-    assert.ok(refs[SEND].data.input[name].endsWith(`{{ ${source} }}`), `the send's call renders ${name} from another value`);
+    assert.ok(refs[SEND].data.input[name].endsWith(`{{ ${name} }}`), `the send's call renders ${name} from another value`);
   }
   assert.ok(!JSON.stringify(refs[SEND].data).includes(PREVIEW_TOOL), "the send's call names the preview tool");
   const description = refs[SEND].metadata.cinatra.description;

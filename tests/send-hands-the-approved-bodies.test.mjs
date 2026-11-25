@@ -1,13 +1,14 @@
 // The send mails the approved body revisions the publish card showed -
 // cinatra-ai/cinatra#3089.
 //
-// The send start takes `approvedBodies`: one `{ artifactId,
-// representationRevisionId, contactId, recipientEmail, subject }` per mailed
-// draft, where `contactId` is the draft's `contactId`, else its `recipientId`,
-// and `recipientEmail` and `subject` are the address and the subject the card
-// showed for that draft (cinatra
-// src/lib/trigger-email-send-use-cases.ts, runInitialSend, the approved form;
-// packages/trigger-email-send/src/mcp/schemas.ts). It mails the text of each
+// The send start reads the approved list from the publish decision a person
+// released for the step: one `{ artifactId, representationRevisionId,
+// contactId, recipientEmail, subject }` per mailed draft, where `contactId` is
+// the draft's `contactId`, else its `recipientId`, and `recipientEmail` and
+// `subject` are the address and the subject the card showed for that draft
+// (cinatra src/lib/trigger-email-send-use-cases.ts, runInitialSend, the approved
+// form; releasedDecisionList in packages/agents/src/publish-decision-store.ts).
+// The request carries no list. It mails the text of each
 // draft's approved revision and refuses the whole send when a mailed draft has
 // no body, a body names no draft or a draft named twice, or one artifact or
 // one contact occurs twice.
@@ -17,9 +18,9 @@
 // position among ALL drafts of the bundle (the drafting pack files one body
 // per draft, in draft order). It refuses the run before the card when a body
 // cannot be joined to exactly one draft, when a mailed draft has no body, or
-// when a contact occurs twice. The card's Emails row and the send's
-// `approvedBodies` are the one output of that step, through one input of the
-// send step.
+// when a contact occurs twice. The card's Emails row and the list the
+// publish decision holds are the one output of that step, through one input of
+// the send step.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -174,21 +175,105 @@ function sourceOf(step, input) {
   return `${refOf(into[0].source_node)}.${into[0].source_output}`;
 }
 
-test("the send call carries approvedBodies from the one input the card's Emails row shows, and no contentDigest", () => {
+test("the send call passes no list of its own: the approved list is the one input the card's Emails row shows, and no contentDigest", () => {
   const send = refs.send;
-  assert.deepEqual(Object.keys(send.data.input).sort(), ["approvedBodies", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"]);
+  assert.deepEqual(Object.keys(send.data.input).sort(), ["approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"]);
+  assert.equal(Object.hasOwn(send.data.input, "approvedBodies"), false, "the send call still passes approvedBodies");
   assert.ok(!JSON.stringify(send.data).includes("contentDigest"), "the send call still names the digest");
   assert.equal(inputOf(send, "contentDigest"), undefined, "the send step still takes the digest");
   assert.equal(dataEdges.filter((e) => refOf(e.destination_node) === "send" && e.destination_input === "contentDigest").length, 0);
-  // The value the send passes as approvedBodies is the input the Emails row shows, as JSON text: the passthrough
-  // road hands a template value on as a string, and the send start reads a list from it.
+  // The list is the input the Emails row shows; the send step surfaces it with its other inputs and the send start
+  // reads it from the released decision.
   const emails = send.metadata.cinatra.publishRows.find((row) => row.label === "Emails");
   assert.equal(emails.kind, "artifacts");
-  assert.ok(send.data.input.approvedBodies.endsWith(`{{ ${emails.input} | tojson }}`), "the send call does not render approvedBodies from the Emails row's input");
+  assert.equal(emails.input, "emailBodies");
+  assert.ok(!JSON.stringify(send.data.input).includes("tojson"), "the send call renders a list into its arguments");
   // That input is the read step's output, and the read step runs right before the send.
   assert.equal(sourceOf("send", emails.input), "resolve_send.emailBodies");
   const into = (oas.control_flow_connections ?? []).filter((e) => refOf(e.to_node) === "send").map((e) => refOf(e.from_node));
   assert.deepEqual(into, ["resolve_send"], "a run reaches the send other than through the read step");
+});
+
+// What the host reads from the released decision. The publish gate surfaces
+// every data-edge input of the publishing step, so the values below are what
+// the decision holds. The send start takes the ONE surfaced value that is a
+// list of 1 to 50 records with exactly these five string members, and a list
+// row of the card must show each record's address and subject in the same
+// order (releasedDecisionList). Two such values, or none, and the send does not
+// take the card's list.
+const LIST_KEYS = ["artifactId", "contactId", "recipientEmail", "representationRevisionId", "subject"];
+const isStrictList = (value) => {
+  let list = value;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      return false;
+    }
+  }
+  return (
+    Array.isArray(list) &&
+    list.length >= 1 &&
+    list.length <= 50 &&
+    list.every((e) => e !== null && typeof e === "object" && Object.keys(e).sort().join() === LIST_KEYS.join() && LIST_KEYS.every((k) => typeof e[k] === "string"))
+  );
+};
+
+async function surfacedValues(bodies = POSITIONAL, p = ports()) {
+  const answer = await call(bodies, p);
+  const values = {
+    campaignId: "5f3c1d52-0b7e-4c0e-9d0b-2a1f6a8d9e10",
+    approvedDraftBundleRef: BUNDLE_REF,
+    confirmedRecipientsRef: LIST_REF,
+    senderEmail: "sender@example.com",
+    agent_run_id: "run-1",
+    recipients: answer.recipients,
+    emailBodies: answer.emailBodies,
+    callToAction: answer.callToAction,
+  };
+  return { answer, values };
+}
+
+test("the send step surfaces every input once, and exactly one of them is the strict list the send reads", async () => {
+  const { values } = await surfacedValues();
+  assert.deepEqual(Object.keys(values).sort(), (refs.send.inputs ?? []).map((entry) => entry.title).sort(), "a surfaced value is not an input of the send step, or the reverse");
+  assert.deepEqual(Object.keys(values).filter((key) => isStrictList(values[key])), ["emailBodies"]);
+  // The same list as JSON text is the same one value.
+  assert.deepEqual(Object.keys(values).filter((key) => isStrictList(JSON.stringify(values[key]))), ["emailBodies"]);
+  // The Recipients records have other members than the five, so they are no second list.
+  for (const record of values.recipients) assert.notDeepEqual(Object.keys(record).sort(), LIST_KEYS);
+  // The schema of the strict list says it: the five members and no other.
+  for (const entry of [inputOf(refs.send, "emailBodies"), (refs.resolve_send.outputs ?? []).find((o) => o.title === "emailBodies")]) {
+    assert.equal(entry.json_schema.items.additionalProperties, false, "the list's records may carry other members");
+  }
+});
+
+test("the card's list row shows the address and the subject of every record of the list, in the same order, with the same strings", async () => {
+  const { values } = await surfacedValues([withContact(POSITIONAL[2], "c-2"), withContact(POSITIONAL[0], "c-1")]);
+  const row = refs.send.metadata.cinatra.publishRows.find((r) => r.kind === "list");
+  assert.deepEqual(row.columns.map((c) => c.field), ["name", "email", "company", "subject"]);
+  const shown = values[row.input];
+  assert.equal(shown.length, values.emailBodies.length);
+  values.emailBodies.forEach((entry, i) => {
+    assert.equal(shown[i].email, entry.recipientEmail, `row ${i + 1}: the address`);
+    assert.equal(shown[i].subject, entry.subject, `row ${i + 1}: the subject`);
+  });
+});
+
+test("the campaign is an input of the send step, fed from the start node, so the decision surfaces it", () => {
+  assert.ok(inputOf(refs.send, "campaignId"), "the send step takes no campaignId");
+  assert.equal(sourceOf("send", "campaignId"), "start.campaignId");
+  assert.match(refs.send.data.input.campaignId, /\{\{ campaignId \}\}$/);
+});
+
+test("one argument carries the input hint for the card's values, and no argument renders the list or the card's other values", () => {
+  const values = Object.values(refs.send.data.input);
+  assert.equal(values.filter((v) => /^\{#/.test(v)).length, 1, "exactly one argument carries the input hint");
+  for (const name of ["emailBodies", "recipients", "callToAction"]) {
+    const hinted = values.find((v) => /^\{#/.test(v));
+    assert.ok(hinted.match(/^\{#[^#]*#\}/)[0].includes(`{{ ${name} }}`), `the hint does not name ${name}`);
+    for (const value of values) assert.ok(!value.replace(/^\{#[^#]*#\}/, "").includes(name), `an argument renders ${name}`);
+  }
 });
 
 // An empty list never reaches the send: the send step is reached only from the

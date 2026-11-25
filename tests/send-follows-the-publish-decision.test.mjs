@@ -24,7 +24,8 @@
 //   3. The send step is a model-free passthrough call of the send start. Its
 //      arguments are templates over its own inputs, each fed by a data edge
 //      from the start node or the read step, so the send mails with the values
-//      the publish card showed; approvedBodies is always the read step's list.
+//      the publish card showed; the request carries no list, the host reads
+//      it from the released decision.
 //      The suite reads the tool names every step's call data carries against
 //      explicit lists: a name that is not on a list fails, so a tool added to
 //      any step turns the suite red until the list names it. Only the send
@@ -178,7 +179,6 @@ test("the send step's confirmations list names the publish decision for the send
 // node or the read step. No model writes an argument: the arguments the send
 // start mails with are the values the publish card showed.
 const SEND_ARGUMENTS = {
-  approvedBodies: { input: "emailBodies", template: "{{ emailBodies | tojson }}", from: "resolve_send.emailBodies" },
   approvedDraftBundleRef: { input: "approvedDraftBundleRef", template: "{{ approvedDraftBundleRef }}", from: "start.approvedDraftBundleRef" },
   campaignId: { input: "campaignId", template: "{{ campaignId }}", from: "start.campaignId" },
   confirmedRecipientsRef: { input: "confirmedRecipientsRef", template: "{{ confirmedRecipientsRef }}", from: "start.confirmedRecipientsRef" },
@@ -211,10 +211,9 @@ test("the send start's arguments are the flow's own values: the send step is a m
   }
 });
 
-test("the send start always takes the approved bodies in the strict form: the list the read step resolved, never the references alone (red: approvedBodies left out, made conditional or given a default)", () => {
-  const value = steps[SEND].data.input.approvedBodies;
-  assert.ok(typeof value === "string" && value.endsWith("{{ emailBodies | tojson }}"));
-  assert.doesNotMatch(value.replace(LEADING_COMMENT, ""), /\{%/, "approvedBodies is passed only under a condition");
+test("the approved list reaches the decision in the strict form: the list the read step resolved, with no default, and the request carries none (red: approvedBodies passed again, or the list given a default)", () => {
+  assert.equal(Object.hasOwn(steps[SEND].data.input, "approvedBodies"), false);
+  assert.deepEqual(dataEdgesInto(SEND, "emailBodies").map((e) => `${refOf(e.source_node)}.${e.source_output}`), ["resolve_send.emailBodies"]);
   const input = (steps[SEND].inputs ?? []).find((entry) => entry.title === "emailBodies");
   assert.equal(Object.hasOwn(input, "default"), false, "the send step's bodies have a default, so the step can start without the read step's list");
   assert.equal(input.type, "array");

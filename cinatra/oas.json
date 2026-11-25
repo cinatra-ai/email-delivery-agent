@@ -755,13 +755,14 @@
         {
           "title": "emailBodies",
           "type": "array",
-          "description": "The approved body of each draft the send mails, in draft order: its artifact revision, compared with the body of its draft, the contact of that draft, and the address and the subject of that draft as the Recipients list shows them. The send step passes this list to the send start as approvedBodies, and the publish card's Emails row shows it. The send start compares each message's contact, address and subject with its entry exactly (the address with its outer white space removed, then byte for byte, the case included) and refuses the whole send on a difference.",
+          "description": "The approved body of each draft the send mails, in draft order: its artifact revision, compared with the body of its draft, the contact of that draft, and the address and the subject of that draft as the Recipients list shows them. The publish card's Emails row shows it. It is the one list of exactly these five members that the send step surfaces: the send start reads it from the publish decision a person released, in this order, and compares each message's contact, address and subject with its entry exactly (the address with its outer white space removed, then byte for byte, the case included) and refuses the whole send on a difference.",
           "json_schema": {
             "type": "array",
             "maxItems": 50,
             "minItems": 1,
             "items": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "artifactId": {
                   "type": "string"
@@ -801,7 +802,7 @@
           "requiresApproval": false,
           "packageName": "@cinatra-ai/email-delivery-agent",
           "publishes": false,
-          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact and the address and subject of that draft, the same ones the Recipients line of that draft shows). The send step takes the recipients and the bodies from this step only and passes the bodies to the send start as approvedBodies, so the publish card shows what the send mails. It also hands on the call to action the card's Call to action row shows, and only one that the text of every mailed body carries, so the card never shows a call to action the send does not mail. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body, a contact or a subject (SUBJECT_MISSING), one contact or one artifact named twice, more than 50 bodies, drafts or confirmed recipients (TOO_MANY_BODIES, TOO_MANY_DRAFTS, TOO_MANY_RECIPIENTS, counted before anything is read), a bundle with nothing to mail, a run without a call to action (CALL_TO_ACTION_MISSING) or a mailed body without it (CALL_TO_ACTION_NOT_IN_EMAIL) ends the run before the card. This step reads the body of each mailed draft and no other body, and writes nothing."
+          "description": "The agent reads the approved draft bundle and the confirmed recipient list, the same two references the send step passes to the send start, and resolves them into what the send mails: the recipients (the address of each draft as the send chooses it) and the approved bodies (the body revision the run hands in for each mailed draft, joined to that draft by its contact or, when the bodies name no contact, by its position in the bundle, compared with the body of that draft, with the draft's contact and the address and subject of that draft, the same ones the Recipients line of that draft shows). The send step takes the recipients and the bodies from this step only, so the publish card, and the decision a person releases there, hold what the send mails. It also hands on the call to action the card's Call to action row shows, and only one that the text of every mailed body carries, so the card never shows a call to action the send does not mail. A body that cannot be joined to exactly one draft or is not the body of its draft, a mailed draft without a body, a contact or a subject (SUBJECT_MISSING), one contact or one artifact named twice, more than 50 bodies, drafts or confirmed recipients (TOO_MANY_BODIES, TOO_MANY_DRAFTS, TOO_MANY_RECIPIENTS, counted before anything is read), a bundle with nothing to mail, a run without a call to action (CALL_TO_ACTION_MISSING) or a mailed body without it (CALL_TO_ACTION_NOT_IN_EMAIL) ends the run before the card. This step reads the body of each mailed draft and no other body, and writes nothing."
         }
       }
     },
@@ -814,11 +815,10 @@
       "data": {
         "tool": "email_outreach_send_initial_start",
         "input": {
-          "campaignId": "{{ campaignId }}",
+          "campaignId": "{# pyagentspec-input-hint (do not remove): {{ emailBodies }} {{ recipients }} {{ callToAction }} #}{{ campaignId }}",
           "senderEmail": "{{ senderEmail }}",
           "approvedDraftBundleRef": "{{ approvedDraftBundleRef }}",
-          "confirmedRecipientsRef": "{{ confirmedRecipientsRef }}",
-          "approvedBodies": "{# pyagentspec-input-hint (do not remove): {{ emailBodies }} {{ recipients }} {{ callToAction }} #}{{ emailBodies | tojson }}"
+          "confirmedRecipientsRef": "{{ confirmedRecipientsRef }}"
         },
         "agent_run_id": "{{ agent_run_id }}"
       },
@@ -883,13 +883,14 @@
         {
           "title": "emailBodies",
           "type": "array",
-          "description": "The approved email bodies the send mails, as the read step joined them to the approved drafts: per mailed draft one artifact revision, the contact of its draft, and the address and the subject the card's Recipients row shows for that draft. The publish card's Emails row shows this list and the send start receives it as approvedBodies; it refuses the whole send before any mail when a message's contact, address or subject differs from its entry; the address is compared byte for byte after its outer white space is removed, so another case is another address",
+          "description": "The approved email bodies the send mails, as the read step joined them to the approved drafts: per mailed draft one artifact revision, the contact of its draft, and the address and the subject the card's Recipients row shows for that draft. The publish card's Emails row shows this list, and it is the one input of this step that has these five members and no other: the send start reads it from the publish decision a person released, in this order, and refuses the whole send before any mail when a message's contact, address or subject differs from its entry; the address is compared byte for byte after its outer white space is removed, so another case is another address",
           "json_schema": {
             "type": "array",
             "maxItems": 50,
             "minItems": 1,
             "items": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "artifactId": {
                   "type": "string"
@@ -1007,7 +1008,7 @@
           "packageName": "@cinatra-ai/email-delivery-agent",
           "renderer": "@cinatra-ai/email-delivery-agent:output",
           "a2uiSurfaceId": "email-delivery:step-1:output",
-          "description": "The flow's one publishing step and a model-free call of email_outreach_send_initial_start on the deterministic passthrough road (/api/agents/passthrough). Sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action); the run reaches the step only after the person chose to send. Every argument of the call is a template over one of this step's inputs, and every input comes by a data edge from the start node or from the read step in front of this step: the campaign, the sender and the two references from the start node, and approvedBodies, the list the card's Emails row shows, from the read step, as JSON text. No model writes an argument, so the send start mails the approved body revisions the person saw, from the mailbox the card showed, to the addresses and with the subjects the card showed (each approved body names the address and the subject of its draft), and refuses the whole send before any mail when one of them does not fit its draft or a message would go to another address or with another subject. The passthrough road serves the send start only to a listed publishing step of the run's flow whose publish decision is released, once; a host whose road does not serve it answers the call with an error, the run ends and nothing is sent. The step returns the send start's answer: its status (completed or failed), the number of messages sent by this call, the operation id and, for a failed send, the reason, and the number of messages an earlier call had already sent (skipped now) and the number in doubt (started and never confirmed, not sent again; a person checks with the mail provider). requiresApproval is false because the publish card is the one approval in front of the send.",
+          "description": "The flow's one publishing step and a model-free call of email_outreach_send_initial_start on the deterministic passthrough road (/api/agents/passthrough). Sending an email is an external write, so the application stops the run in front of this step and shows its publish card with the four rows declared here (From, Recipients, Emails, Call to action); the run reaches the step only after the person chose to send. Every argument of the call is a template over one of this step's inputs, and every input comes by a data edge from the start node or from the read step in front of this step: the campaign, the sender and the two references from the start node. The step's other inputs, the recipients, the emails and the call to action, come from the read step and are not arguments: the application surfaces every input of the step in the publish decision, and the send start reads from it the one list of approved emails (emailBodies, the list the Emails row shows) with the campaign. No model writes an argument or a list, so the send start mails the approved body revisions the person saw, from the mailbox the card showed, to the addresses and with the subjects the card showed (each approved body names the address and the subject of its draft), and refuses the whole send before any mail when one of them does not fit its draft or a message would go to another address or with another subject. The passthrough road serves the send start only to a listed publishing step of the run's flow whose publish decision is released, once; a host whose road does not serve it answers the call with an error, the run ends and nothing is sent. The step returns the send start's answer: its status (completed or failed), the number of messages sent by this call, the operation id and, for a failed send, the reason, and the number of messages an earlier call had already sent (skipped now) and the number in doubt (started and never confirmed, not sent again; a person checks with the mail provider). requiresApproval is false because the publish card is the one approval in front of the send.",
           "confirmations": [
             {
               "tool": "email_outreach_send_initial_start",
