@@ -76,6 +76,46 @@ const addEndOutput = (from, output) => (flow) => {
   flow.$referenced_components.end.outputs.push(clone(declaration));
   flow.outputs.push(clone(declaration));
 };
+/**
+ * The contract of an omit-input on a start step: the input leaves EVERY place
+ * that names it, so the copy's start has no trace of it. These are the step's
+ * inputs, the flow's inputs, the step's outputs where it declares any, every
+ * data edge that leaves the start through it, and, in the step's metadata
+ * (metadata.cinatra), the lists required and hidden and the maps inputRenderers,
+ * inputTitles and inputDataSources, which the host reads by input name. A map
+ * or list left empty by it stays as an empty member's absence: an emptied key
+ * is removed.
+ */
+const START_METADATA_LISTS = ["required", "hidden"];
+const START_METADATA_MAPS = ["inputRenderers", "inputTitles", "inputDataSources"];
+const omitStartInput = (input) => (flow) => {
+  const start = flow.$referenced_components.start;
+  for (const owner of [start, flow]) {
+    const at = titled(owner.inputs, input);
+    assert.ok(at >= 0, "an owner has no input " + input);
+    owner.inputs.splice(at, 1);
+  }
+  if (Array.isArray(start.outputs)) {
+    const at = titled(start.outputs, input);
+    if (at >= 0) start.outputs.splice(at, 1);
+  }
+  flow.data_flow_connections = flow.data_flow_connections.filter((e) => !(refOf(e.source_node) === "start" && e.source_output === input));
+  const meta = start.metadata?.cinatra;
+  if (meta) {
+    for (const key of START_METADATA_LISTS) {
+      if (Array.isArray(meta[key])) {
+        meta[key] = meta[key].filter((name) => name !== input);
+        if (meta[key].length === 0) delete meta[key];
+      }
+    }
+    for (const key of START_METADATA_MAPS) {
+      if (meta[key] && typeof meta[key] === "object") {
+        delete meta[key][input];
+        if (Object.keys(meta[key]).length === 0) delete meta[key];
+      }
+    }
+  }
+};
 const dataEdgeToEnd = (from, output) => (flow) => {
   flow.data_flow_connections.push({
     component_type: "DataFlowEdge",
@@ -126,14 +166,8 @@ const DIFFERENCES = [
   })),
   {
     name: "omit-input start senderEmail",
-    why: "Only the send takes the sender; the copy prepares the recipients and the emails and needs none.",
-    apply(flow) {
-      for (const owner of [flow.$referenced_components.start, flow]) {
-        const at = titled(owner.inputs, "senderEmail");
-        assert.ok(at >= 0, "an owner has no input senderEmail");
-        owner.inputs.splice(at, 1);
-      }
-    },
+    why: "Only the send takes the sender; the copy prepares the recipients and the emails and needs none. The input leaves every place that names it.",
+    apply: omitStartInput("senderEmail"),
   },
   ...["recipients", "emailBodies", "callToAction"].map((output) => ({
     name: `add-output end ${output} from resolve_send`,
@@ -158,6 +192,48 @@ const DIFFERENCES = [
     },
   },
 ];
+
+/**
+ * Every name a flow's steps use that the step does not have: the start's
+ * metadata (required, hidden, and the maps keyed by input name) against the
+ * start's inputs, the flow's inputs against the start's, a step's card rows and
+ * its call and message templates against the step's own inputs, and each data
+ * edge's two ends against the outputs and inputs of the steps it joins.
+ */
+function dangling(flow) {
+  const found = [];
+  const steps = flow.$referenced_components;
+  const names = (list) => new Set((list ?? []).map((entry) => entry.title));
+  const start = Object.values(steps).find((step) => step.component_type === "StartNode");
+  if (start) {
+    const have = names(start.inputs);
+    const meta = start.metadata?.cinatra ?? {};
+    for (const key of START_METADATA_LISTS) for (const name of meta[key] ?? []) if (!have.has(name)) found.push(`${start.id}.metadata.cinatra.${key} names ${name}`);
+    for (const key of START_METADATA_MAPS) for (const name of Object.keys(meta[key] ?? {})) if (!have.has(name)) found.push(`${start.id}.metadata.cinatra.${key} names ${name}`);
+    const own = [...names(flow.inputs)].sort().join();
+    if (own !== [...have].sort().join()) found.push(`the flow's inputs (${own}) differ from the start's`);
+  }
+  for (const step of Object.values(steps)) {
+    const inputs = names(step.inputs);
+    const meta = step.metadata?.cinatra ?? {};
+    for (const row of meta.publishRows ?? []) if (!inputs.has(row.input)) found.push(`${step.id} row ${row.label} names input ${row.input}`);
+    if (step.component_type === "ApiNode" || step.component_type === "OutputMessageNode") {
+      const text = JSON.stringify(step.data ?? step.message ?? "");
+      const used = new Set([...text.matchAll(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]));
+      for (const name of used) if (name !== "CINATRA_BASE_URL" && !inputs.has(name)) found.push(`${step.id} renders ${name}, which is no input of it`);
+    }
+  }
+  for (const edge of flow.data_flow_connections) {
+    const from = steps[refOf(edge.source_node)];
+    const to = steps[refOf(edge.destination_node)];
+    if (!from || !to) { found.push(`edge ${edge.name} joins a step that is absent`); continue; }
+    const gives = from.component_type === "StartNode" ? from.inputs : from.outputs;
+    const takes = to.component_type === "EndNode" ? to.outputs : to.inputs;
+    if (titled(gives, edge.source_output) < 0) found.push(`edge ${edge.name}: ${from.id} has no ${edge.source_output}`);
+    if (titled(takes, edge.destination_input) < 0) found.push(`edge ${edge.name}: ${to.id} has no ${edge.destination_input}`);
+  }
+  return found;
+}
 
 /** The generator's prefix: on every step id and key, every reference, every edge name and a filing step's node_id. */
 function prefixed(flow) {
@@ -255,6 +331,36 @@ test("the copy's end hands on what the read step resolved, and the carried send 
   const fromCopy = resolved;
   const fromParent = ["agent_run_id", "approvedDraftBundleRef", "campaignId", "confirmedRecipientsRef", "senderEmail"];
   assert.deepStrictEqual(sendInputs, [...fromCopy, ...fromParent].sort(), "the carried send takes an input that neither the copy nor the outreach supplies");
+});
+
+test("no step of the copy, and no step of this flow or of the carried send, names an input or an output it does not have", () => {
+  assert.deepStrictEqual(dangling(copy), []);
+  assert.deepStrictEqual(dangling(oas), []);
+  assert.deepStrictEqual(dangling({ ...clone(oas), $referenced_components: { send: carried }, data_flow_connections: [], inputs: [] }).filter((line) => !line.startsWith("the flow's inputs")), []);
+  // The check is not empty: each of these leaves a name behind.
+  const left = (change) => {
+    const flow = clone(copy);
+    change(flow);
+    return dangling(flow);
+  };
+  const start = (flow) => flow.$referenced_components[`${PREFIX}start`];
+  assert.match(left((f) => start(f).metadata.cinatra.required.push("senderEmail")).join(), /required names senderEmail/);
+  assert.match(left((f) => (start(f).metadata.cinatra.inputRenderers = { senderEmail: "x" })).join(), /inputRenderers names senderEmail/);
+  assert.match(left((f) => start(f).metadata.cinatra.hidden.push("senderEmail")).join(), /hidden names senderEmail/);
+  assert.match(left((f) => (start(f).metadata.cinatra.inputTitles = { senderEmail: "x" })).join(), /inputTitles names senderEmail/);
+  assert.match(left((f) => f.inputs.push({ title: "senderEmail", type: "string" })).join(), /flow's inputs/);
+  assert.match(left((f) => f.$referenced_components[`${PREFIX}resolve_send`].data.input.input.callToAction = "{{ senderEmail }}").join(), /renders senderEmail/);
+  assert.match(left((f) => f.data_flow_connections[0].source_output = "senderEmail").join(), /has no senderEmail/);
+});
+
+test("the start's metadata names only the copy's own inputs", () => {
+  const start = copy.$referenced_components[`${PREFIX}start`];
+  const meta = start.metadata.cinatra;
+  assert.deepStrictEqual(meta.required, ["callToAction"]);
+  assert.deepStrictEqual(meta.hidden, ["agent_run_id", "confirmedRecipientsRef", "approvedDraftBundleRef", "campaignId", "emailBodies"]);
+  assert.equal(Object.hasOwn(meta, "inputRenderers"), false);
+  assert.ok(!JSON.stringify(start).includes("senderEmail"), "the copy's start still names senderEmail");
+  assert.ok(!JSON.stringify(copy.inputs).includes("senderEmail"), "the copy's inputs still name senderEmail");
 });
 
 test("the named differences are the whole list, each with a reason", () => {

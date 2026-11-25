@@ -329,7 +329,6 @@
       "metadata": {
         "cinatra": {
           "required": [
-            "senderEmail",
             "callToAction"
           ],
           "hidden": [
@@ -338,10 +337,7 @@
             "approvedDraftBundleRef",
             "campaignId",
             "emailBodies"
-          ],
-          "inputRenderers": {
-            "senderEmail": "@cinatra-ai/email-outreach-agent:gmail-sender"
-          }
+          ]
         }
       },
       "inputs": [
